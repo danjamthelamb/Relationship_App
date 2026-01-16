@@ -1,0 +1,16 @@
+[theme]
+base = "light"
+
+# Main action color (Draw names)
+primaryColor = "#F96E5B"
+
+# Page background (warm, not white)
+backgroundColor = "#FFF7E6"
+
+# Cards, containers, metrics
+secondaryBackgroundColor = "#FFE2AF"
+
+# Main text (don’t use pure black)
+textColor = "#1F2937"
+
+font = "sans serif"

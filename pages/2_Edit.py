@@ -1,8 +1,20 @@
 import streamlit as st
 import pandas as pd
-from db import get_people_df, init_db, upsert_people
+from db import get_people_df, init_db, upsert_people, reset_drawn, reset_prev
+from ui_theme import inject_theme
 
 st.set_page_config(page_title="Edit People", page_icon="✏️", layout="centered")
+inject_theme()
+
+st.markdown(
+    """
+    <style>
+      [data-testid="stSidebarNav"] { display: none; }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 init_db()
 
 st.title("Edit Friends & Family")
@@ -44,3 +56,19 @@ with col1:
 
 with col2:
     st.page_link("pages/1_Home.py", label="⬅️ Back to Home", use_container_width=True)
+
+with st.expander("Reset contact cycle", expanded=False):
+    st.warning("This sets selected people back to *untexted* (drawn = 0).")
+
+    confirm = st.checkbox("I understand this will reset progress.")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("Reset Friends", disabled=not confirm):
+            reset_drawn("Friend"); reset_prev("Friend"); st.success("Friends reset."); st.rerun()
+    with c2:
+        if st.button("Reset Family", disabled=not confirm):
+            reset_drawn("Family"); reset_prev("Family"); st.success("Family reset."); st.rerun()
+    with c3:
+        if st.button("Reset All", disabled=not confirm):
+            reset_drawn(None); reset_prev(None); st.success("All reset."); st.rerun()

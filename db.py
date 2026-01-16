@@ -225,3 +225,24 @@ def seed_from_your_dicts(friends_d: dict[str, int], family_d: dict[str, int]) ->
                 "INSERT OR IGNORE INTO people(name, relationship, drawn) VALUES(?,?,?);",
                 (name.strip(), "Family", int(drawn)),
             )
+
+def reset_drawn(relationship: str | None = None) -> None:
+    """
+    relationship: 'Friend', 'Family', or None for all
+    Sets drawn=0 (untexted) for the selected scope.
+    """
+    with _connect() as conn:
+        if relationship in ("Friend", "Family"):
+            conn.execute("UPDATE people SET drawn=0 WHERE relationship=?;", (relationship,))
+        else:
+            conn.execute("UPDATE people SET drawn=0;")
+
+
+def reset_prev(relationship: str | None = None) -> None:
+    if relationship == "Friend":
+        _set_meta("prev_friend", "")
+    elif relationship == "Family":
+        _set_meta("prev_family", "")
+    else:
+        _set_meta("prev_friend", "")
+        _set_meta("prev_family", "")
