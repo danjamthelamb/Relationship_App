@@ -46,7 +46,7 @@ edited = st.data_editor(
 
 col1, col2 = st.columns(2)
 with col1:
-    if st.button("💾 Save changes", use_container_width=True):
+    if st.button("Save changes", icon=":material/save:", use_container_width=True):
         # normalize checkbox True/False -> 1/0
         edited2 = edited.copy()
         edited2["drawn"] = edited2["drawn"].astype(int)
@@ -55,7 +55,9 @@ with col1:
         st.rerun()
 
 with col2:
-    st.page_link("pages/1_Home.py", label="⬅️ Back to Home", use_container_width=True)
+    # st.page_link("pages/1_Home.py", label="Back to Home", icon=":material/undo:", use_container_width=True)
+    if st.button("Back to Home", icon=":material/undo:", use_container_width=True):
+        st.switch_page("pages/1_Home.py")
 
 with st.expander("Reset contact cycle", expanded=False):
     st.warning("This sets selected people back to *untexted* (drawn = 0).")

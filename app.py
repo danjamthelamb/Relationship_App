@@ -77,6 +77,25 @@ st.markdown(
     margin: 0;
 }
 
+.brand-row img{
+  height: 34px;
+  width: auto;
+}
+
+.brand-name{
+  font-size: 4rem;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.brand-in{
+  color: #3F9AAE;   /* calm, attentive */
+}
+
+.brand-touch{
+  color: #F96E5B;   /* warmth, human */
+}
+
 .bullet-wrap li {
     margin: 0.4rem 0;
 }
@@ -129,7 +148,9 @@ st.markdown(
     f"""
 <div class="hero">
 
-  <div class="app-title">{APP_NAME}</div>
+  <div class="brand-name">
+    <span class="brand-in">In</span><span class="brand-touch">Touch</span>
+  </div>
   <p class="tagline">A gentle way to stay connected.</p>
 
   <p class="body">
