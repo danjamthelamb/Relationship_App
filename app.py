@@ -2,12 +2,12 @@
 # App Configuration (app.py)
 ####################
 import streamlit as st
+
 from auth import require_user, logout_button
-from ui_theme import inject_theme
+from ui_theme import inject_theme, render_brand_header
 
 
 APP_NAME = "InTouch"
-image_path = "assets/logo_icon.png"
 favicon_path = "assets/favicon.png"
 
 
@@ -32,46 +32,37 @@ inject_theme()
 # -------------------------------------------------
 current_user = require_user()
 
-st.success(f"Logged in as {current_user.display_name}")
-st.write(f"Email: {current_user.email}")
-st.write("InTouch user ID:", current_user.id)
+
+st.success(
+    f"Logged in as {current_user.display_name}"
+)
+
+st.write(
+    f"Email: {current_user.email}"
+)
+
+st.write(
+    "InTouch user ID:",
+    current_user.id,
+)
+
 
 logout_button()
 
 
 # -------------------------------------------------
-# Logo
-# -------------------------------------------------
-l, c, r = st.columns([1, 1, 1])
-
-with c:
-    st.image(image_path)
-
-
-# -------------------------------------------------
-# Styles
+# Landing page styles
 # -------------------------------------------------
 st.markdown(
     """
 <style>
+
 .hero {
     max-width: 720px;
     margin: 0 auto;
     text-align: center;
 }
 
-
-/* Logo */
-.hero img {
-    display: block;
-    margin: 0 auto 0.25rem auto;
-}
-
-
-/* Title + tagline */
-.hero h1 {
-    margin-bottom: 0.25rem;
-}
 
 .tagline {
     margin-top: 0;
@@ -80,7 +71,6 @@ st.markdown(
 }
 
 
-/* Body text */
 .body {
     opacity: 0.92;
     line-height: 1.6;
@@ -88,15 +78,14 @@ st.markdown(
 }
 
 
-/* Bullet group card */
 .bullet-wrap {
     max-width: 520px;
     margin: 1.1rem auto;
     padding: 0.9rem 1.2rem;
     border-radius: 14px;
 
-    background: rgba(121, 201, 197, 0.22);       /* #79C9C5 wash */
-    border: 1px solid rgba(63, 154, 174, 0.35);  /* #3F9AAE line */
+    background: rgba(121, 201, 197, 0.22);
+    border: 1px solid rgba(63, 154, 174, 0.35);
 
     text-align: left;
 }
@@ -110,51 +99,18 @@ st.markdown(
 }
 
 
-.brand-row img {
-    height: 34px;
-    width: auto;
-}
-
-
-.brand-name {
-    font-size: 4rem;
-    font-weight: 900;
-    letter-spacing: -0.02em;
-}
-
-
-.brand-in {
-    color: #3F9AAE;   /* calm, attentive */
-}
-
-
-.brand-touch {
-    color: #F96E5B;   /* warmth, human */
-}
-
-
 .bullet-wrap li {
     margin: 0.4rem 0;
 }
 
 
-/* Closing line */
 .closing {
     margin-top: 1rem;
     opacity: 0.90;
 }
 
 
-.app-title {
-    font-size: 3rem;
-    font-weight: 700;
-    line-height: 1.1;
-    margin: 0 0 0.25rem 0;
-    color: #2E6F7A !important;
-    text-shadow: 0 1px 0 rgba(0,0,0,0.06);
-}
-
-
+/* Landing page primary CTA */
 .stButton > button[kind="primary"] {
     background-color: #F96E5B;
     color: #222831 !important;
@@ -172,17 +128,21 @@ st.markdown(
 }
 
 
-/* Ensure hover/active states stay teal too */
 .stButton > button[kind="primary"]:hover,
 .stButton > button[kind="primary"]:active {
     color: #222831 !important;
 }
 
-
 </style>
 """,
     unsafe_allow_html=True,
 )
+
+
+# -------------------------------------------------
+# Branding
+# -------------------------------------------------
+render_brand_header(centered=True)
 
 
 # -------------------------------------------------
@@ -192,42 +152,36 @@ st.markdown(
     f"""
 <div class="hero">
 
-  <div class="brand-name">
-    <span class="brand-in">In</span><span class="brand-touch">Touch</span>
-  </div>
+<p class="tagline">
+A gentle way to stay connected.
+</p>
 
-  <p class="tagline">A gentle way to stay connected.</p>
+<p class="body">
+<strong>{APP_NAME}</strong> helps people stay meaningfully connected —
+<br>
+without relying on memory, guilt, or social media noise.
+</p>
 
+<p class="body">
+Instead of asking <em>“Who should I text today?”</em>
+<br>
+{APP_NAME} gently chooses for you.
+</p>
 
-  <p class="body">
-    <strong>{APP_NAME}</strong> helps people stay meaningfully connected —
-    <br>
-    without relying on memory, guilt, or social media noise.
-  </p>
+<div class="bullet-wrap">
+<ul>
+<li>One friend</li>
+<li>One family member</li>
+<li>No repeats until everyone has been reached</li>
+<li>No pressure, no feeds, no algorithms</li>
+</ul>
+</div>
 
-
-  <p class="body">
-    Instead of asking <em>“Who should I text today?”</em>
-    <br>
-    {APP_NAME} gently chooses for you.
-  </p>
-
-
-  <div class="bullet-wrap">
-    <ul>
-      <li>One friend</li>
-      <li>One family member</li>
-      <li>No repeats until everyone has been reached</li>
-      <li>No pressure, no feeds, no algorithms</li>
-    </ul>
-  </div>
-
-
-  <p class="closing">
-    It’s a small daily habit designed to keep real relationships alive —
-    <br>
-    one message at a time.
-  </p>
+<p class="closing">
+It’s a small daily habit designed to keep real relationships alive —
+<br>
+one message at a time.
+</p>
 
 </div>
 """,
@@ -240,7 +194,9 @@ st.markdown(
 # -------------------------------------------------
 st.divider()
 
+
 left, center, right = st.columns([1, 2, 1])
+
 
 with center:
     if st.button(

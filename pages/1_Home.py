@@ -1,31 +1,20 @@
 ####################
 # User Homepage (1_Home.py)
 ####################
-import base64
-from pathlib import Path
-
 import streamlit as st
 
 from auth import require_user
-from db import get_counts
-from ui_theme import inject_theme
+from db import get_counts, add_person
+from ui_theme import inject_theme, render_brand_header
 
 
-image_path = "assets/logo_icon.png"
 favicon_path = "assets/favicon.png"
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-
-def img_to_data_url(relative_path: str) -> str:
-    path = PROJECT_ROOT / relative_path
-    data = path.read_bytes()
-    b64 = base64.b64encode(data).decode("utf-8")
-    return f"data:image/png;base64,{b64}"
 
 
 # -------------------------------------------------
-# Page config MUST come first
+# PAGE CONFIG
 # -------------------------------------------------
+
 st.set_page_config(
     page_title="Home",
     page_icon=favicon_path,
@@ -34,103 +23,182 @@ st.set_page_config(
 
 
 # -------------------------------------------------
-# Theme
+# THEME
 # -------------------------------------------------
+
 inject_theme()
 
 
 # -------------------------------------------------
-# Authentication
+# AUTHENTICATION
 # -------------------------------------------------
+
 current_user = require_user()
 
 
 # -------------------------------------------------
-# Styles
+# BRANDING
 # -------------------------------------------------
-st.markdown(
-    """
-<style>
 
-/* Reduce top padding so things feel less floaty */
-.block-container {
-    padding-top: 2rem;
-    padding-bottom: 2rem;
-}
+render_brand_header()
 
 
-.brand-row {
-    display: flex;
-    align-items: center;
-    gap: 0.9rem;
-    margin-bottom: 1.2rem;
-}
+# -------------------------------------------------
+# FIRST-TIME / EMPTY-LIST ONBOARDING
+# -------------------------------------------------
+
+@st.dialog("Welcome to InTouch")
+def first_people_dialog(
+    needs_friend: bool,
+    needs_family: bool,
+) -> None:
+
+    if needs_friend and needs_family:
+        st.write(
+            "Let’s get your network started with one friend "
+            "and one family member."
+        )
+
+    elif needs_friend:
+        st.write(
+            "Your family list is ready. "
+            "Let’s add your first friend."
+        )
+
+    elif needs_family:
+        st.write(
+            "Your friends list is ready. "
+            "Let’s add your first family member."
+        )
 
 
-.brand-row img {
-    height: 72px;
-    width: auto;
-}
+    with st.form("first_people_form"):
+
+        friend_name = ""
+        family_name = ""
 
 
-.brand-name {
-    font-size: 3.2rem;
-    font-weight: 900;
-    letter-spacing: -0.03em;
-    line-height: 1;
-}
+        if needs_friend:
+
+            friend_name = st.text_input(
+                "Your first friend",
+                placeholder="Enter their name",
+            )
 
 
-.brand-in {
-    color: #3F9AAE;
-}
+        if needs_family:
+
+            family_name = st.text_input(
+                "Your first family member",
+                placeholder="Enter their name",
+            )
 
 
-.brand-touch {
-    color: #F96E5B;
-}
+        submitted = st.form_submit_button(
+            "Get started",
+            icon=":material/person_add:",
+            use_container_width=True,
+            type="primary",
+        )
 
 
-/* Slightly tighten divider spacing */
-hr {
-    margin-top: 1.25rem;
-    margin-bottom: 1.25rem;
-}
+        if submitted:
 
-</style>
-""",
-    unsafe_allow_html=True,
+            # -------------------------
+            # VALIDATION
+            # -------------------------
+
+            if (
+                needs_friend
+                and not friend_name.strip()
+            ):
+                st.error(
+                    "Please enter a friend."
+                )
+                return
+
+
+            if (
+                needs_family
+                and not family_name.strip()
+            ):
+                st.error(
+                    "Please enter a family member."
+                )
+                return
+
+
+            # -------------------------
+            # SAVE
+            # -------------------------
+
+            try:
+
+                if needs_friend:
+
+                    add_person(
+                        current_user.id,
+                        friend_name,
+                        "Friend",
+                    )
+
+
+                if needs_family:
+
+                    add_person(
+                        current_user.id,
+                        family_name,
+                        "Family",
+                    )
+
+
+            except ValueError as e:
+
+                st.error(str(e))
+                return
+
+
+            st.rerun()
+
+
+# -------------------------------------------------
+# COUNTS / ONBOARDING CHECK
+# -------------------------------------------------
+
+counts = get_counts(
+    current_user.id
 )
 
 
-# -------------------------------------------------
-# Branding
-# -------------------------------------------------
-logo_url = img_to_data_url("assets/logo_icon.png")
+needs_friend = (
+    counts["Friend"]["total"] == 0
+)
 
-st.markdown(
-    f"""
-<div class="brand-row">
-<img src="{logo_url}" />
-<span class="brand-name"><span class="brand-in">In</span><span class="brand-touch">Touch</span></span>
-</div>
-""",
-    unsafe_allow_html=True,
+needs_family = (
+    counts["Family"]["total"] == 0
 )
 
 
+if needs_friend or needs_family:
+
+    first_people_dialog(
+        needs_friend=needs_friend,
+        needs_family=needs_family,
+    )
+
+
 # -------------------------------------------------
-# Summary
+# SUMMARY
 # -------------------------------------------------
+
 st.header("Summary")
-
-
-counts = get_counts(current_user.id)
 
 
 col1, col2 = st.columns(2)
 
+
 with col1:
+
     st.metric(
         "Friends",
         counts["Friend"]["total"],
@@ -143,6 +211,7 @@ with col1:
 
 
 with col2:
+
     st.metric(
         "Family",
         counts["Family"]["total"],
@@ -155,29 +224,40 @@ with col2:
 
 
 # -------------------------------------------------
-# Draw
+# DRAW
 # -------------------------------------------------
+
 st.divider()
 
 
-left, center, right = st.columns([1, 2, 1])
+left, center, right = st.columns(
+    [1, 2, 1]
+)
+
 
 with center:
+
     if st.button(
         "Draw names for today",
         use_container_width=True,
         type="primary",
     ):
-        st.switch_page("pages/3_Todays_Drawing.py")
+
+        st.switch_page(
+            "pages/3_Todays_Drawing.py"
+        )
 
 
 st.divider()
 
 
 # -------------------------------------------------
-# Edit lists
+# EDIT LISTS
 # -------------------------------------------------
-st.caption("Need to update your lists?")
+
+st.caption(
+    "Need to update your lists?"
+)
 
 
 if st.button(
@@ -185,4 +265,7 @@ if st.button(
     icon=":material/edit_square:",
     use_container_width=False,
 ):
-    st.switch_page("pages/2_Edit.py")
+
+    st.switch_page(
+        "pages/2_Edit.py"
+    )

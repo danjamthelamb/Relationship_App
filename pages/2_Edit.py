@@ -1,6 +1,8 @@
 ####################
 # Edit People (2_Edit.py)
 ####################
+import uuid
+
 import pandas as pd
 import streamlit as st
 
@@ -8,7 +10,6 @@ from auth import require_user
 from db import (
     get_people_df,
     upsert_people,
-    add_person,
     reset_drawn,
     reset_prev,
 )
@@ -24,7 +25,6 @@ st.set_page_config(
     page_icon="✏️",
     layout="centered",
 )
-
 
 inject_theme()
 
@@ -42,12 +42,52 @@ current_user = require_user()
 
 st.markdown(
     """
-    <style>
-      [data-testid="stSidebarNav"] { display: none; }
-    </style>
-    """,
+<style>
+[data-testid="stSidebarNav"] {
+    display: none;
+}
+</style>
+""",
     unsafe_allow_html=True,
 )
+
+
+# ---------------------------------------------------
+# DRAFT DATA
+# ---------------------------------------------------
+
+draft_key = f"people_draft_{current_user.id}"
+
+
+def load_draft() -> pd.DataFrame:
+    df = get_people_df(current_user.id).copy()
+
+    if df.empty:
+        df = pd.DataFrame(
+            columns=[
+                "id",
+                "name",
+                "relationship",
+                "drawn",
+                "last_drawn_date",
+            ]
+        )
+
+    df["last_drawn_date"] = pd.to_datetime(
+        df["last_drawn_date"],
+        errors="coerce",
+    ).dt.date
+
+    df["_draft_id"] = [
+        f"db:{person_id}"
+        for person_id in df["id"]
+    ]
+
+    return df
+
+
+if draft_key not in st.session_state:
+    st.session_state[draft_key] = load_draft()
 
 
 # ---------------------------------------------------
@@ -77,22 +117,104 @@ def add_person_dialog():
 
         if submitted:
 
-            if not name.strip():
+            name = name.strip()
+
+            if not name:
                 st.error("Please enter a name.")
                 return
 
-            try:
-                add_person(
-                    current_user.id,
-                    name,
-                    relationship,
-                )
+            draft = st.session_state[draft_key].copy()
 
-            except ValueError as e:
-                st.error(str(e))
+            # Prevent duplicates within the same relationship.
+            duplicate = (
+                (
+                    draft["name"]
+                    .astype(str)
+                    .str.strip()
+                    .str.casefold()
+                    == name.casefold()
+                )
+                &
+                (
+                    draft["relationship"]
+                    == relationship
+                )
+            ).any()
+
+            if duplicate:
+                st.error(
+                    f"{name} already exists in your "
+                    f"{relationship} list."
+                )
                 return
 
+            new_person = pd.DataFrame(
+                [
+                    {
+                        "id": pd.NA,
+                        "name": name,
+                        "relationship": relationship,
+                        "drawn": 0,
+                        "last_drawn_date": None,
+
+                        # Temporary identifier.
+                        # This never goes into SQLite.
+                        "_draft_id": f"new:{uuid.uuid4()}",
+                    }
+                ]
+            )
+
+            st.session_state[draft_key] = pd.concat(
+                [
+                    draft,
+                    new_person,
+                ],
+                ignore_index=True,
+            )
+
             st.rerun()
+
+@st.dialog("Remove person")
+def remove_person_dialog():
+
+    draft = st.session_state[draft_key].copy()
+
+    if draft.empty:
+        st.info("There are no people to remove.")
+        return
+
+    # Build labels while using _draft_id as the actual unique value.
+    person_options = draft["_draft_id"].tolist()
+
+    person_lookup = {
+        row["_draft_id"]: (
+            f'{row["name"]} — {row["relationship"]}'
+        )
+        for _, row in draft.iterrows()
+    }
+
+    selected_id = st.selectbox(
+        "Person",
+        person_options,
+        format_func=lambda draft_id: person_lookup[draft_id],
+    )
+
+    st.warning(
+        "This person will only be removed when you save your changes."
+    )
+
+    if st.button(
+        "Remove person",
+        icon=":material/delete:",
+        type="primary",
+        use_container_width=True,
+    ):
+
+        st.session_state[draft_key] = draft[
+            draft["_draft_id"] != selected_id
+        ].copy()
+
+        st.rerun()
 
 
 # ---------------------------------------------------
@@ -107,78 +229,109 @@ st.caption(
 
 
 # ---------------------------------------------------
-# ADD PERSON BUTTON
+# ADD / REMOVE PERSON
 # ---------------------------------------------------
 
-if st.button(
-    "Add new person",
-    icon=":material/person_add:",
-    use_container_width=True,
-):
-    add_person_dialog()
+add_col, remove_col = st.columns(2)
+
+with add_col:
+    if st.button(
+        "Add new person",
+        icon=":material/person_add:",
+        use_container_width=True,
+    ):
+        add_person_dialog()
+
+with remove_col:
+    if st.button(
+        "Remove person",
+        icon=":material/delete:",
+        use_container_width=True,
+    ):
+        remove_person_dialog()
+
+
+# ---------------------------------------------------
+# FILTER
+# ---------------------------------------------------
+
+filter_choice = st.segmented_control(
+    "Show",
+    options=[
+        "All",
+        "Friends",
+        "Family",
+    ],
+    default="All",
+)
+
+
+# Always work from the temporary draft.
+all_people_df = st.session_state[draft_key].copy()
+
+
+if filter_choice == "Friends":
+
+    display_df = all_people_df[
+        all_people_df["relationship"] == "Friend"
+    ].copy()
+
+
+elif filter_choice == "Family":
+
+    display_df = all_people_df[
+        all_people_df["relationship"] == "Family"
+    ].copy()
+
+
+else:
+
+    display_df = all_people_df.copy()
 
 
 # ---------------------------------------------------
 # PEOPLE TABLE
 # ---------------------------------------------------
 
-# Keep the COMPLETE user dataset.
-all_people_df = get_people_df(current_user.id)
-
-
-filter_choice = st.segmented_control(
-    "Show",
-    options=["All", "Friends", "Family"],
-    default="All",
-)
-
-
-# Create a filtered COPY only for display.
-if filter_choice == "Friends":
-    display_df = all_people_df[
-        all_people_df["relationship"] == "Friend"
-    ].copy()
-
-elif filter_choice == "Family":
-    display_df = all_people_df[
-        all_people_df["relationship"] == "Family"
-    ].copy()
-
-else:
-    display_df = all_people_df.copy()
-
-
-if display_df.empty:
-    display_df = pd.DataFrame(
-        columns=[
-            "id",
-            "name",
-            "relationship",
-            "drawn",
-        ]
-    )
-
-
 edited = st.data_editor(
     display_df,
     num_rows="fixed",
     use_container_width=True,
     hide_index=True,
+
     column_order=[
         "name",
         "relationship",
+        "last_drawn_date",
     ],
+
     column_config={
         "name": st.column_config.TextColumn(
             "Name",
             required=True,
         ),
+
         "relationship": st.column_config.SelectboxColumn(
             "Relationship",
-            options=["Friend", "Family"],
+            options=[
+                "Friend",
+                "Family",
+            ],
             required=True,
         ),
+
+        "last_drawn_date": st.column_config.DateColumn(
+            "Last reached",
+            format="localized",
+            help="The most recent date this person was drawn.",
+        ),
     },
+
+    disabled=[
+        "last_drawn_date",
+    ],
+
+    key=f"people_editor_{current_user.id}_{filter_choice}",
 )
 
 
@@ -197,34 +350,72 @@ with col1:
         use_container_width=True,
     ):
 
-        edited2 = edited.copy()
+        updated_draft = (
+            st.session_state[draft_key].copy()
+        )
 
-        if not edited2.empty:
-            edited2["drawn"] = edited2["drawn"].astype(int)
+        # Merge the visible editor rows back into
+        # the complete draft.
+        for _, edited_row in edited.iterrows():
 
-        # Start with the complete dataset.
-        updated_df = all_people_df.copy()
+            draft_id = edited_row["_draft_id"]
 
-        # Replace only the rows that were visible/editable.
-        for _, edited_row in edited2.iterrows():
+            mask = (
+                updated_draft["_draft_id"]
+                == draft_id
+            )
 
-            row_id = int(edited_row["id"])
-
-            updated_df.loc[
-                updated_df["id"] == row_id,
-                ["name", "relationship", "drawn"],
+            updated_draft.loc[
+                mask,
+                [
+                    "name",
+                    "relationship",
+                    "drawn",
+                ],
             ] = [
-                edited_row["name"],
+                str(edited_row["name"]).strip(),
                 edited_row["relationship"],
-                edited_row["drawn"],
+                int(edited_row["drawn"]),
             ]
 
-        upsert_people(
-            current_user.id,
-            updated_df,
+        # Remove blank names before saving.
+        updated_draft["name"] = (
+            updated_draft["name"]
+            .astype(str)
+            .str.strip()
+        )
+
+        updated_draft = updated_draft[
+            updated_draft["name"] != ""
+        ].copy()
+
+        try:
+
+            upsert_people(
+                current_user.id,
+                updated_draft[
+                    [
+                        "id",
+                        "name",
+                        "relationship",
+                        "drawn",
+                    ]
+                ],
+            )
+
+        except ValueError as e:
+
+            st.error(str(e))
+            st.stop()
+
+        # Database is now the source of truth again.
+        st.session_state.pop(
+            draft_key,
+            None,
         )
 
         st.success("Saved!")
+
         st.rerun()
 
 
@@ -235,7 +426,17 @@ with col2:
         icon=":material/undo:",
         use_container_width=True,
     ):
-        st.switch_page("pages/1_Home.py")
+
+        # Throw away EVERYTHING that has not
+        # been saved to SQLite.
+        st.session_state.pop(
+            draft_key,
+            None,
+        )
+
+        st.switch_page(
+            "pages/1_Home.py"
+        )
 
 
 # ---------------------------------------------------
@@ -255,7 +456,6 @@ with st.expander(
         "I understand this will reset progress."
     )
 
-
     c1, c2, c3 = st.columns(3)
 
 
@@ -274,6 +474,12 @@ with st.expander(
             reset_prev(
                 current_user.id,
                 "Friend",
+            )
+
+            # Refresh the draft from the database.
+            st.session_state.pop(
+                draft_key,
+                None,
             )
 
             st.success("Friends reset.")
@@ -297,6 +503,11 @@ with st.expander(
                 "Family",
             )
 
+            st.session_state.pop(
+                draft_key,
+                None,
+            )
+
             st.success("Family reset.")
             st.rerun()
 
@@ -315,6 +526,11 @@ with st.expander(
 
             reset_prev(
                 current_user.id,
+                None,
+            )
+
+            st.session_state.pop(
+                draft_key,
                 None,
             )
 

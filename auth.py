@@ -1,6 +1,10 @@
+####################
+# Authentication (auth.py)
+####################
 import streamlit as st
 
 from db import User, get_or_create_user, init_db
+from ui_theme import render_brand_header
 
 
 def require_user() -> User:
@@ -9,14 +13,19 @@ def require_user() -> User:
     the corresponding InTouch user record.
     """
 
-    # Safe to call repeatedly; ensures the DB/schema exists.
     init_db()
 
     if not st.user.is_logged_in:
-        st.title("InTouch")
+
+        render_brand_header()
+
         st.write("Sign in to continue.")
 
-        if st.button("Sign in with Google"):
+        if st.button(
+            "Sign in with Google",
+            use_container_width=True,
+            type="primary",
+        ):
             st.login()
 
         st.stop()
