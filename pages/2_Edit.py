@@ -1,29 +1,44 @@
 ####################
 # Edit People (2_Edit.py)
 ####################
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
+from auth import require_user
 from db import (
     get_people_df,
-    init_db,
     upsert_people,
     add_person,
     reset_drawn,
     reset_prev,
 )
-
 from ui_theme import inject_theme
 
+
+# ---------------------------------------------------
+# PAGE CONFIG
+# ---------------------------------------------------
 
 st.set_page_config(
     page_title="Edit People",
     page_icon="✏️",
-    layout="centered"
+    layout="centered",
 )
+
 
 inject_theme()
 
+
+# ---------------------------------------------------
+# AUTHENTICATION
+# ---------------------------------------------------
+
+current_user = require_user()
+
+
+# ---------------------------------------------------
+# STYLES
+# ---------------------------------------------------
 
 st.markdown(
     """
@@ -31,11 +46,8 @@ st.markdown(
       [data-testid="stSidebarNav"] { display: none; }
     </style>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
-
-
-init_db()
 
 
 # ---------------------------------------------------
@@ -49,18 +61,18 @@ def add_person_dialog():
 
         name = st.text_input(
             "Name",
-            placeholder="Enter their name"
+            placeholder="Enter their name",
         )
 
         relationship = st.selectbox(
             "Relationship",
-            ["Friend", "Family"]
+            ["Friend", "Family"],
         )
 
         submitted = st.form_submit_button(
             "Add person",
             icon=":material/person_add:",
-            use_container_width=True
+            use_container_width=True,
         )
 
         if submitted:
@@ -70,7 +82,11 @@ def add_person_dialog():
                 return
 
             try:
-                add_person(name, relationship)
+                add_person(
+                    current_user.id,
+                    name,
+                    relationship,
+                )
 
             except ValueError as e:
                 st.error(str(e))
@@ -97,7 +113,7 @@ st.caption(
 if st.button(
     "Add new person",
     icon=":material/person_add:",
-    use_container_width=True
+    use_container_width=True,
 ):
     add_person_dialog()
 
@@ -106,7 +122,8 @@ if st.button(
 # PEOPLE TABLE
 # ---------------------------------------------------
 
-df = get_people_df()
+# Keep the COMPLETE user dataset.
+all_people_df = get_people_df(current_user.id)
 
 
 filter_choice = st.segmented_control(
@@ -116,42 +133,50 @@ filter_choice = st.segmented_control(
 )
 
 
+# Create a filtered COPY only for display.
 if filter_choice == "Friends":
-    df = df[df["relationship"] == "Friend"]
+    display_df = all_people_df[
+        all_people_df["relationship"] == "Friend"
+    ].copy()
 
 elif filter_choice == "Family":
-    df = df[df["relationship"] == "Family"]
+    display_df = all_people_df[
+        all_people_df["relationship"] == "Family"
+    ].copy()
+
+else:
+    display_df = all_people_df.copy()
 
 
-if df.empty:
-    df = pd.DataFrame(
+if display_df.empty:
+    display_df = pd.DataFrame(
         columns=[
             "id",
             "name",
             "relationship",
-            "drawn"
+            "drawn",
         ]
     )
 
 
 edited = st.data_editor(
-    df,
+    display_df,
     num_rows="fixed",
     use_container_width=True,
     hide_index=True,
     column_order=[
         "name",
-        "relationship"
+        "relationship",
     ],
     column_config={
         "name": st.column_config.TextColumn(
             "Name",
-            required=True
+            required=True,
         ),
         "relationship": st.column_config.SelectboxColumn(
             "Relationship",
             options=["Friend", "Family"],
-            required=True
+            required=True,
         ),
     },
 )
@@ -169,17 +194,37 @@ with col1:
     if st.button(
         "Save changes",
         icon=":material/save:",
-        use_container_width=True
+        use_container_width=True,
     ):
 
         edited2 = edited.copy()
 
-        edited2["drawn"] = edited2["drawn"].astype(int)
+        if not edited2.empty:
+            edited2["drawn"] = edited2["drawn"].astype(int)
 
-        upsert_people(edited2)
+        # Start with the complete dataset.
+        updated_df = all_people_df.copy()
+
+        # Replace only the rows that were visible/editable.
+        for _, edited_row in edited2.iterrows():
+
+            row_id = int(edited_row["id"])
+
+            updated_df.loc[
+                updated_df["id"] == row_id,
+                ["name", "relationship", "drawn"],
+            ] = [
+                edited_row["name"],
+                edited_row["relationship"],
+                edited_row["drawn"],
+            ]
+
+        upsert_people(
+            current_user.id,
+            updated_df,
+        )
 
         st.success("Saved!")
-
         st.rerun()
 
 
@@ -188,9 +233,8 @@ with col2:
     if st.button(
         "Back to Home",
         icon=":material/undo:",
-        use_container_width=True
+        use_container_width=True,
     ):
-
         st.switch_page("pages/1_Home.py")
 
 
@@ -200,7 +244,7 @@ with col2:
 
 with st.expander(
     "Reset contact cycle",
-    expanded=False
+    expanded=False,
 ):
 
     st.warning(
@@ -219,14 +263,20 @@ with st.expander(
 
         if st.button(
             "Reset Friends",
-            disabled=not confirm
+            disabled=not confirm,
         ):
 
-            reset_drawn("Friend")
-            reset_prev("Friend")
+            reset_drawn(
+                current_user.id,
+                "Friend",
+            )
+
+            reset_prev(
+                current_user.id,
+                "Friend",
+            )
 
             st.success("Friends reset.")
-
             st.rerun()
 
 
@@ -234,14 +284,20 @@ with st.expander(
 
         if st.button(
             "Reset Family",
-            disabled=not confirm
+            disabled=not confirm,
         ):
 
-            reset_drawn("Family")
-            reset_prev("Family")
+            reset_drawn(
+                current_user.id,
+                "Family",
+            )
+
+            reset_prev(
+                current_user.id,
+                "Family",
+            )
 
             st.success("Family reset.")
-
             st.rerun()
 
 
@@ -249,12 +305,18 @@ with st.expander(
 
         if st.button(
             "Reset All",
-            disabled=not confirm
+            disabled=not confirm,
         ):
 
-            reset_drawn(None)
-            reset_prev(None)
+            reset_drawn(
+                current_user.id,
+                None,
+            )
+
+            reset_prev(
+                current_user.id,
+                None,
+            )
 
             st.success("All reset.")
-
             st.rerun()

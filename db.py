@@ -26,24 +26,135 @@ DB_PATH = Path("data") / "texter.sqlite"
 
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
+
     return conn
+
+def _migrate_people_to_multiuser(conn: sqlite3.Connection) -> None:
+    """
+    Migrates the old single-user people table to the multi-user schema.
+
+    Existing people are assigned to the oldest InTouch user,
+    which for our current database is user ID 1.
+    """
+
+    # Does the people table already exist?
+    people_exists = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'people';
+        """
+    ).fetchone()
+
+    if not people_exists:
+        return
+
+    # Check whether user_id already exists.
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(people);").fetchall()
+    }
+
+    if "user_id" in columns:
+        # Already migrated.
+        return
+
+    # Find the original/oldest InTouch user.
+    legacy_owner = conn.execute(
+        """
+        SELECT id
+        FROM users
+        ORDER BY id
+        LIMIT 1;
+        """
+    ).fetchone()
+
+    if legacy_owner is None:
+        raise RuntimeError(
+            "Cannot migrate existing people because no InTouch user exists."
+        )
+
+    legacy_user_id = legacy_owner["id"]
+
+    # Remove the old global uniqueness rule.
+    conn.execute("DROP INDEX IF EXISTS ux_people_rel_name;")
+
+    # In case a previous migration attempt failed halfway through.
+    conn.execute("DROP TABLE IF EXISTS people_new;")
+
+    # Create the new multi-user table.
+    conn.execute(
+        """
+        CREATE TABLE people_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            user_id INTEGER NOT NULL,
+
+            name TEXT NOT NULL,
+
+            relationship TEXT NOT NULL
+                CHECK (relationship IN ('Friend', 'Family')),
+
+            drawn INTEGER NOT NULL DEFAULT 0
+                CHECK (drawn IN (0, 1)),
+
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+
+            FOREIGN KEY (user_id)
+                REFERENCES users(id)
+                ON DELETE CASCADE
+        );
+        """
+    )
+
+    # Copy all existing people and assign them to the original user.
+    conn.execute(
+        """
+        INSERT INTO people_new (
+            id,
+            user_id,
+            name,
+            relationship,
+            drawn,
+            created_at
+        )
+        SELECT
+            id,
+            ?,
+            name,
+            relationship,
+            drawn,
+            created_at
+        FROM people;
+        """,
+        (legacy_user_id,),
+    )
+
+    # Replace the old table with the new one.
+    conn.execute("DROP TABLE people;")
+    conn.execute("ALTER TABLE people_new RENAME TO people;")
+
+    # Names only need to be unique within a user's own relationship list.
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX ux_people_user_rel_name
+        ON people(user_id, relationship, name);
+        """
+    )
 
 
 def init_db() -> None:
     with _connect() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS people (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                relationship TEXT NOT NULL CHECK (relationship IN ('Friend','Family')),
-                drawn INTEGER NOT NULL DEFAULT 0 CHECK (drawn IN (0,1)),
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            """
-        )
+
+        # -------------------------
+        # Users
+        # -------------------------
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -58,12 +169,68 @@ def init_db() -> None:
             );
             """
         )
+
+
+        # -------------------------
+        # People
+        # -------------------------
+
+        people_exists = conn.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'people';
+            """
+        ).fetchone()
+
+        if people_exists:
+            _migrate_people_to_multiuser(conn)
+
+        else:
+            conn.execute(
+                """
+                CREATE TABLE people (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                    user_id INTEGER NOT NULL,
+
+                    name TEXT NOT NULL,
+
+                    relationship TEXT NOT NULL
+                        CHECK (relationship IN ('Friend', 'Family')),
+
+                    drawn INTEGER NOT NULL DEFAULT 0
+                        CHECK (drawn IN (0, 1)),
+
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+
+                    FOREIGN KEY (user_id)
+                        REFERENCES users(id)
+                        ON DELETE CASCADE
+                );
+                """
+            )
+
+
+        # Remove old single-user index if it somehow still exists.
+        conn.execute(
+            "DROP INDEX IF EXISTS ux_people_rel_name;"
+        )
+
+        # Multi-user uniqueness rule.
         conn.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_people_rel_name
-            ON people(relationship, name);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_people_user_rel_name
+            ON people(user_id, relationship, name);
             """
         )
+
+
+        # -------------------------
+        # Meta
+        # -------------------------
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS meta (
@@ -72,46 +239,104 @@ def init_db() -> None:
             );
             """
         )
-        # store last pick per relationship (like your prev_d)
-        conn.execute("INSERT OR IGNORE INTO meta(key,value) VALUES ('prev_friend','');")
-        conn.execute("INSERT OR IGNORE INTO meta(key,value) VALUES ('prev_family','');")
 
 
-def get_people_df() -> pd.DataFrame:
+def get_people_df(user_id: int) -> pd.DataFrame:
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT id, name, relationship, drawn FROM people ORDER BY relationship, name;"
+            """
+            SELECT
+                id,
+                name,
+                relationship,
+                drawn
+            FROM people
+            WHERE user_id = ?
+            ORDER BY relationship, name;
+            """,
+            (user_id,),
         ).fetchall()
+
     return pd.DataFrame([dict(r) for r in rows])
 
 
-def get_counts() -> dict:
+def get_counts(user_id: int) -> dict:
     with _connect() as conn:
         out = {}
+
         for rel in ("Friend", "Family"):
             total = conn.execute(
-                "SELECT COUNT(*) AS n FROM people WHERE relationship=?;", (rel,)
+                """
+                SELECT COUNT(*) AS n
+                FROM people
+                WHERE user_id = ?
+                  AND relationship = ?;
+                """,
+                (user_id, rel),
             ).fetchone()["n"]
+
             remaining = conn.execute(
-                "SELECT COUNT(*) AS n FROM people WHERE relationship=? AND drawn=0;",
-                (rel,),
+                """
+                SELECT COUNT(*) AS n
+                FROM people
+                WHERE user_id = ?
+                  AND relationship = ?
+                  AND drawn = 0;
+                """,
+                (user_id, rel),
             ).fetchone()["n"]
-            out[rel] = {"total": total, "remaining": remaining}
-        return out
+
+            out[rel] = {
+                "total": total,
+                "remaining": remaining,
+            }
+
+    return out
 
 
-def _get_meta(key: str) -> str:
+def _get_meta(
+    user_id: int,
+    key: str,
+) -> str:
+    user_key = f"user:{user_id}:{key}"
+
     with _connect() as conn:
-        row = conn.execute("SELECT value FROM meta WHERE key=?;", (key,)).fetchone()
+        row = conn.execute(
+            """
+            SELECT value
+            FROM meta
+            WHERE key = ?;
+            """,
+            (user_key,),
+        ).fetchone()
+
     return (row["value"] if row else "") or ""
 
 
-def _set_meta(key: str, value: str) -> None:
+def _set_meta(
+    user_id: int,
+    key: str,
+    value: str,
+) -> None:
+    user_key = f"user:{user_id}:{key}"
+
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO meta(key,value) VALUES(?,?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
-            (key, value),
+            """
+            INSERT INTO meta (
+                key,
+                value
+            )
+            VALUES (?, ?)
+
+            ON CONFLICT(key)
+            DO UPDATE SET
+                value = excluded.value;
+            """,
+            (
+                user_key,
+                value,
+            ),
         )
 
 
@@ -273,50 +498,153 @@ def draw_friend_and_family() -> DrawResult:
     return DrawResult(friend=friend, family=family)
 
 
-def upsert_people(df: pd.DataFrame) -> None:
+def upsert_people(
+    user_id: int,
+    df: pd.DataFrame,
+) -> None:
     """
-    Save edits from the editor.
-    Expected columns: id, name, relationship, drawn
+    Save edits for one user's people.
+
+    Expected columns:
+        id, name, relationship, drawn
+
+    Only records belonging to user_id can be
+    inserted, updated, or deleted.
     """
-    # basic cleanup
+
     df = df.copy()
+
+    # Basic cleanup
     df["name"] = df["name"].astype(str).str.strip()
     df = df[df["name"] != ""]
 
-    with _connect() as conn:
-        existing_ids = set(
-            r["id"]
-            for r in conn.execute("SELECT id FROM people;").fetchall()
+    # Validate relationships
+    invalid_relationships = df[
+        ~df["relationship"].isin(["Friend", "Family"])
+    ]
+
+    if not invalid_relationships.empty:
+        raise ValueError(
+            "Relationship must be Friend or Family."
         )
-        incoming_ids = set(int(x) for x in df["id"].dropna().astype(int).tolist())
 
-        # Delete rows removed in editor (only those that existed)
-        to_delete = sorted(existing_ids - incoming_ids)
-        if to_delete:
-            conn.executemany("DELETE FROM people WHERE id=?;", [(i,) for i in to_delete])
+    try:
+        with _connect() as conn:
 
-        # Upsert remaining
-        for _, row in df.iterrows():
-            rid = int(row["id"]) if pd.notna(row["id"]) else None
-            name = str(row["name"]).strip()
-            rel = row["relationship"]
-            drawn = int(row["drawn"]) if "drawn" in row and pd.notna(row["drawn"]) else 0
+            # Get ONLY this user's existing records
+            existing_ids = {
+                row["id"]
+                for row in conn.execute(
+                    """
+                    SELECT id
+                    FROM people
+                    WHERE user_id = ?;
+                    """,
+                    (user_id,),
+                ).fetchall()
+            }
 
-            if rid is None or rid == 0:
-                # insert
-                conn.execute(
-                    "INSERT OR IGNORE INTO people(name, relationship, drawn) VALUES(?,?,?);",
-                    (name, rel, drawn),
+            # IDs coming back from the editor
+            incoming_ids = {
+                int(x)
+                for x in df["id"].dropna().astype(int).tolist()
+            }
+
+            # Delete records removed from this user's dataset
+            to_delete = sorted(existing_ids - incoming_ids)
+
+            if to_delete:
+                conn.executemany(
+                    """
+                    DELETE FROM people
+                    WHERE id = ?
+                      AND user_id = ?;
+                    """,
+                    [
+                        (person_id, user_id)
+                        for person_id in to_delete
+                    ],
                 )
-            else:
-                # update
-                conn.execute(
-                    "UPDATE people SET name=?, relationship=?, drawn=? WHERE id=?;",
-                    (name, rel, drawn, rid),
+
+            # Insert/update remaining records
+            for _, row in df.iterrows():
+
+                rid = (
+                    int(row["id"])
+                    if pd.notna(row["id"])
+                    else None
                 )
 
+                name = str(row["name"]).strip()
+                relationship = row["relationship"]
 
-def add_person(name: str, relationship: Relationship) -> None:
+                drawn = (
+                    int(row["drawn"])
+                    if "drawn" in row
+                    and pd.notna(row["drawn"])
+                    else 0
+                )
+
+                # -------------------------
+                # New person
+                # -------------------------
+                if rid is None or rid == 0:
+
+                    conn.execute(
+                        """
+                        INSERT INTO people (
+                            user_id,
+                            name,
+                            relationship,
+                            drawn
+                        )
+                        VALUES (?, ?, ?, ?);
+                        """,
+                        (
+                            user_id,
+                            name,
+                            relationship,
+                            drawn,
+                        ),
+                    )
+
+                # -------------------------
+                # Existing person
+                # -------------------------
+                else:
+
+                    conn.execute(
+                        """
+                        UPDATE people
+                        SET
+                            name = ?,
+                            relationship = ?,
+                            drawn = ?
+                        WHERE id = ?
+                          AND user_id = ?;
+                        """,
+                        (
+                            name,
+                            relationship,
+                            drawn,
+                            rid,
+                            user_id,
+                        ),
+                    )
+
+    except sqlite3.IntegrityError as e:
+        raise ValueError(
+            "A person with that name already exists "
+            "in that relationship list."
+        ) from e
+
+
+def add_person(
+    user_id: int,
+    name: str,
+    relationship: Relationship,
+) -> None:
+
     name = name.strip()
 
     if not name:
@@ -329,14 +657,23 @@ def add_person(name: str, relationship: Relationship) -> None:
         with _connect() as conn:
             conn.execute(
                 """
-                INSERT INTO people (name, relationship)
-                VALUES (?, ?);
+                INSERT INTO people (
+                    user_id,
+                    name,
+                    relationship
+                )
+                VALUES (?, ?, ?);
                 """,
-                (name, relationship),
+                (
+                    user_id,
+                    name,
+                    relationship,
+                ),
             )
+
     except sqlite3.IntegrityError:
         raise ValueError(
-            f"{name} already exists in the {relationship} list."
+            f"{name} already exists in your {relationship} list."
         )
 
 def seed_from_your_dicts(friends_d: dict[str, int], family_d: dict[str, int]) -> None:
@@ -356,23 +693,72 @@ def seed_from_your_dicts(friends_d: dict[str, int], family_d: dict[str, int]) ->
                 (name.strip(), "Family", int(drawn)),
             )
 
-def reset_drawn(relationship: str | None = None) -> None:
+def reset_drawn(
+    user_id: int,
+    relationship: str | None = None,
+) -> None:
     """
-    relationship: 'Friend', 'Family', or None for all
-    Sets drawn=0 (untexted) for the selected scope.
+    relationship:
+        "Friend", "Family", or None for all
+
+    Sets drawn = 0 only for the selected user's records.
     """
+
     with _connect() as conn:
+
         if relationship in ("Friend", "Family"):
-            conn.execute("UPDATE people SET drawn=0 WHERE relationship=?;", (relationship,))
+            conn.execute(
+                """
+                UPDATE people
+                SET drawn = 0
+                WHERE user_id = ?
+                  AND relationship = ?;
+                """,
+                (
+                    user_id,
+                    relationship,
+                ),
+            )
+
         else:
-            conn.execute("UPDATE people SET drawn=0;")
+            conn.execute(
+                """
+                UPDATE people
+                SET drawn = 0
+                WHERE user_id = ?;
+                """,
+                (user_id,),
+            )
 
 
-def reset_prev(relationship: str | None = None) -> None:
+def reset_prev(
+    user_id: int,
+    relationship: str | None = None,
+) -> None:
+
     if relationship == "Friend":
-        _set_meta("prev_friend", "")
+        _set_meta(
+            user_id,
+            "prev_friend",
+            "",
+        )
+
     elif relationship == "Family":
-        _set_meta("prev_family", "")
+        _set_meta(
+            user_id,
+            "prev_family",
+            "",
+        )
+
     else:
-        _set_meta("prev_friend", "")
-        _set_meta("prev_family", "")
+        _set_meta(
+            user_id,
+            "prev_friend",
+            "",
+        )
+
+        _set_meta(
+            user_id,
+            "prev_family",
+            "",
+        )

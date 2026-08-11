@@ -2,12 +2,14 @@
 # App Configuration (app.py)
 ####################
 import streamlit as st
-from db import init_db, get_or_create_user
+from auth import require_user, logout_button
 from ui_theme import inject_theme
+
 
 APP_NAME = "InTouch"
 image_path = "assets/logo_icon.png"
 favicon_path = "assets/favicon.png"
+
 
 # -------------------------------------------------
 # Page config MUST come first
@@ -18,41 +20,32 @@ st.set_page_config(
     layout="centered",
 )
 
-init_db()
 
-# -------------------------
+# -------------------------------------------------
+# Theme
+# -------------------------------------------------
+inject_theme()
+
+
+# -------------------------------------------------
 # Authentication
-# -------------------------
-
-if not st.user.is_logged_in:
-    st.title("InTouch")
-    st.write("Sign in to continue.")
-
-    if st.button("Sign in with Google"):
-        st.login()
-
-    st.stop()
-
-current_user = get_or_create_user(
-    auth_provider="google",
-    auth_subject=st.user.sub,
-    email=st.user.email,
-    display_name=st.user.name,
-)
+# -------------------------------------------------
+current_user = require_user()
 
 st.success(f"Logged in as {current_user.display_name}")
 st.write(f"Email: {current_user.email}")
 st.write("InTouch user ID:", current_user.id)
 
-if st.button("Log out"):
-    st.logout()
+logout_button()
 
-inject_theme()
 
+# -------------------------------------------------
+# Logo
+# -------------------------------------------------
 l, c, r = st.columns([1, 1, 1])
+
 with c:
     st.image(image_path)
-
 
 
 # -------------------------------------------------
@@ -67,21 +60,25 @@ st.markdown(
     text-align: center;
 }
 
+
 /* Logo */
 .hero img {
     display: block;
     margin: 0 auto 0.25rem auto;
 }
 
+
 /* Title + tagline */
 .hero h1 {
     margin-bottom: 0.25rem;
 }
+
 .tagline {
     margin-top: 0;
     font-style: italic;
     opacity: 0.85;
 }
+
 
 /* Body text */
 .body {
@@ -89,6 +86,7 @@ st.markdown(
     line-height: 1.6;
     margin-top: 1rem;
 }
+
 
 /* Bullet group card */
 .bullet-wrap {
@@ -103,6 +101,7 @@ st.markdown(
     text-align: left;
 }
 
+
 .bullet-wrap ul {
     list-style-type: disc;
     list-style-position: outside;
@@ -110,28 +109,34 @@ st.markdown(
     margin: 0;
 }
 
-.brand-row img{
-  height: 34px;
-  width: auto;
+
+.brand-row img {
+    height: 34px;
+    width: auto;
 }
 
-.brand-name{
-  font-size: 4rem;
-  font-weight: 900;
-  letter-spacing: -0.02em;
+
+.brand-name {
+    font-size: 4rem;
+    font-weight: 900;
+    letter-spacing: -0.02em;
 }
 
-.brand-in{
-  color: #3F9AAE;   /* calm, attentive */
+
+.brand-in {
+    color: #3F9AAE;   /* calm, attentive */
 }
 
-.brand-touch{
-  color: #F96E5B;   /* warmth, human */
+
+.brand-touch {
+    color: #F96E5B;   /* warmth, human */
 }
+
 
 .bullet-wrap li {
     margin: 0.4rem 0;
 }
+
 
 /* Closing line */
 .closing {
@@ -139,29 +144,33 @@ st.markdown(
     opacity: 0.90;
 }
 
-.app-title{
-  font-size: 3rem;
-  font-weight: 700;
-  line-height: 1.1;
-  margin: 0 0 0.25rem 0;
-  color: #2E6F7A !important;
-  text-shadow: 0 1px 0 rgba(0,0,0,0.06);
+
+.app-title {
+    font-size: 3rem;
+    font-weight: 700;
+    line-height: 1.1;
+    margin: 0 0 0.25rem 0;
+    color: #2E6F7A !important;
+    text-shadow: 0 1px 0 rgba(0,0,0,0.06);
 }
 
+
 .stButton > button[kind="primary"] {
-    background-color: #F96E5B;   /* coral */
-    color: #222831 !important;  /* 👈 Teal text */
+    background-color: #F96E5B;
+    color: #222831 !important;
     border-radius: 14px;
     font-weight: 900;
     letter-spacing: 0.02em;
 }
 
+
 .stButton > button[kind="primary"] * {
     color: #222831 !important;
-    font-weight: 700 !important;     /* use a weight that actually exists */
-    font-size: 1.09rem !important;   /* makes it feel bolder immediately */
+    font-weight: 700 !important;
+    font-size: 1.09rem !important;
     letter-spacing: 0.08em;
 }
+
 
 /* Ensure hover/active states stay teal too */
 .stButton > button[kind="primary"]:hover,
@@ -169,13 +178,15 @@ st.markdown(
     color: #222831 !important;
 }
 
+
 </style>
 """,
     unsafe_allow_html=True,
 )
 
+
 # -------------------------------------------------
-# Hero section (logo + title without anchor icon)
+# Hero section
 # -------------------------------------------------
 st.markdown(
     f"""
@@ -184,7 +195,9 @@ st.markdown(
   <div class="brand-name">
     <span class="brand-in">In</span><span class="brand-touch">Touch</span>
   </div>
+
   <p class="tagline">A gentle way to stay connected.</p>
+
 
   <p class="body">
     <strong>{APP_NAME}</strong> helps people stay meaningfully connected —
@@ -192,11 +205,13 @@ st.markdown(
     without relying on memory, guilt, or social media noise.
   </p>
 
+
   <p class="body">
     Instead of asking <em>“Who should I text today?”</em>
     <br>
     {APP_NAME} gently chooses for you.
   </p>
+
 
   <div class="bullet-wrap">
     <ul>
@@ -207,15 +222,18 @@ st.markdown(
     </ul>
   </div>
 
+
   <p class="closing">
     It’s a small daily habit designed to keep real relationships alive —
     <br>
     one message at a time.
   </p>
+
 </div>
 """,
     unsafe_allow_html=True,
 )
+
 
 # -------------------------------------------------
 # CTA
@@ -223,6 +241,11 @@ st.markdown(
 st.divider()
 
 left, center, right = st.columns([1, 2, 1])
+
 with center:
-    if st.button("Get started!", use_container_width=True, type="primary"):
+    if st.button(
+        "Get started!",
+        use_container_width=True,
+        type="primary",
+    ):
         st.switch_page("pages/1_Home.py")

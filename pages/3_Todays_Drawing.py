@@ -153,7 +153,7 @@ l, c, r = st.columns([1, 6, 1])
 with c:
     st.title("Today’s connections")
 
-counts = get_counts()
+counts = get_counts(current_user.id)
 if counts["Friend"]["total"] == 0 or counts["Family"]["total"] == 0:
     st.warning("You need at least **1 Friend** and **1 Family** person before drawing.")
     if st.button("✏️ Add people", type="primary"):
@@ -205,7 +205,7 @@ st.markdown(
 
 st.divider()
 
-counts2 = get_counts()
+counts2 = get_counts(current_user.id)
 st.markdown(
     f"<p class='center muted'>Remaining this cycle — "
     f"Friends: {counts2['Friend']['remaining']} · "
