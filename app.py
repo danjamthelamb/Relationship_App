@@ -17,6 +17,28 @@ st.set_page_config(
     page_icon=favicon_path,
     layout="centered",
 )
+
+# -------------------------
+# Authentication
+# -------------------------
+
+if not st.user.is_logged_in:
+    st.title("InTouch")
+    st.write("Sign in to continue.")
+
+    if st.button("Sign in with Google"):
+        st.login()
+
+    st.stop()
+
+
+st.success(f"Logged in as {st.user.name}")
+st.write(f"Email: {st.user.email}")
+st.write("Google user ID:", st.user.sub)
+
+if st.button("Log out"):
+    st.logout()
+
 inject_theme()
 
 l, c, r = st.columns([1, 1, 1])
