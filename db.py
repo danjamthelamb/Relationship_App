@@ -181,28 +181,6 @@ def get_or_create_user(
 ) -> User:
 
     with _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO users (
-                auth_provider,
-                auth_subject,
-                email,
-                display_name
-            )
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(auth_provider, auth_subject)
-            DO UPDATE SET
-                email = excluded.email,
-                display_name = excluded.display_name;
-            """,
-            (
-                auth_provider,
-                auth_subject,
-                email,
-                display_name,
-            ),
-        )
-
         row = conn.execute(
             """
             SELECT
@@ -218,12 +196,65 @@ def get_or_create_user(
             (auth_provider, auth_subject),
         ).fetchone()
 
+        if row is None:
+            cursor = conn.execute(
+                """
+                INSERT INTO users (
+                    auth_provider,
+                    auth_subject,
+                    email,
+                    display_name
+                )
+                VALUES (?, ?, ?, ?);
+                """,
+                (
+                    auth_provider,
+                    auth_subject,
+                    email,
+                    display_name,
+                ),
+            )
+
+            user_id = cursor.lastrowid
+
+        else:
+            user_id = row["id"]
+
+            # Keep profile information current
+            conn.execute(
+                """
+                UPDATE users
+                SET email = ?,
+                    display_name = ?
+                WHERE id = ?;
+                """,
+                (
+                    email,
+                    display_name,
+                    user_id,
+                ),
+            )
+
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                auth_provider,
+                auth_subject,
+                email,
+                display_name
+            FROM users
+            WHERE id = ?;
+            """,
+            (user_id,),
+        ).fetchone()
+
     return User(
-        id=row[0],
-        auth_provider=row[1],
-        auth_subject=row[2],
-        email=row[3],
-        display_name=row[4],
+        id=row["id"],
+        auth_provider=row["auth_provider"],
+        auth_subject=row["auth_subject"],
+        email=row["email"],
+        display_name=row["display_name"],
     )
 
 @dataclass

@@ -83,7 +83,7 @@ def add_person_dialog():
 # PAGE
 # ---------------------------------------------------
 
-st.title("Edit Friends & Family")
+st.title("Update Your Network")
 
 st.caption(
     "Add people or update names and relationships."
