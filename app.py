@@ -160,7 +160,7 @@ st.markdown(
   </p>
 
   <p class="body">
-    Instead of asking <em>“Who should I text today?”</em>,
+    Instead of asking <em>“Who should I text today?”</em>
     <br>
     {APP_NAME} gently chooses for you.
   </p>
@@ -169,7 +169,7 @@ st.markdown(
     <ul>
       <li>One friend</li>
       <li>One family member</li>
-      <li><strong>No repeats</strong> until everyone has been reached</li>
+      <li>No repeats until everyone has been reached</li>
       <li>No pressure, no feeds, no algorithms</li>
     </ul>
   </div>

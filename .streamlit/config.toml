@@ -18,3 +18,9 @@ font = "sans serif"
 
 [ui]
 hideSidebarNav = true
+
+[client]
+toolbarMode = "minimal"
+
+[server]
+headless = true

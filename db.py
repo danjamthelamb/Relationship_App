@@ -209,6 +209,29 @@ def upsert_people(df: pd.DataFrame) -> None:
                 )
 
 
+def add_person(name: str, relationship: Relationship) -> None:
+    name = name.strip()
+
+    if not name:
+        raise ValueError("Name cannot be empty.")
+
+    if relationship not in ("Friend", "Family"):
+        raise ValueError("Relationship must be Friend or Family.")
+
+    try:
+        with _connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO people (name, relationship)
+                VALUES (?, ?);
+                """,
+                (name, relationship),
+            )
+    except sqlite3.IntegrityError:
+        raise ValueError(
+            f"{name} already exists in the {relationship} list."
+        )
+
 def seed_from_your_dicts(friends_d: dict[str, int], family_d: dict[str, int]) -> None:
     """
     Optional helper: migrate from your existing texter_log dicts into SQLite once.
