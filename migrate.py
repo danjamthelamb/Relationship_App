@@ -1,3 +1,6 @@
+####################
+# Migration Script (migrate.py)
+####################
 from texter_log import friends_d, family_d
 from db import seed_from_your_dicts
 

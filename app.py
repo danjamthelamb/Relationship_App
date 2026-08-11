@@ -1,3 +1,6 @@
+####################
+# App Configuration (app.py)
+####################
 import streamlit as st
 from db import init_db
 from ui_theme import inject_theme

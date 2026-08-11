@@ -1,3 +1,6 @@
+####################
+# User Homepage (1_Home.py)
+####################
 import base64
 import streamlit as st
 from db import get_counts, init_db

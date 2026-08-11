@@ -1,0 +1,22 @@
+# Virtual environment
+.venv/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# OAuth / credential downloads
+client_secret*.json
+credentials*.json
+
+# Local database
+data/*.sqlite
+data/*.sqlite3
+data/*.db
+
+# OS junk
+.DS_Store
+Thumbs.db
