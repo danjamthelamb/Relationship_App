@@ -13,6 +13,13 @@ import pandas as pd
 
 Relationship = Literal["Friend", "Family"]
 
+@dataclass(frozen=True)
+class User:
+    id: int
+    auth_provider: str
+    auth_subject: str
+    email: str
+    display_name: str | None
 
 DB_PATH = Path("data") / "texter.sqlite"
 
@@ -34,6 +41,20 @@ def init_db() -> None:
                 relationship TEXT NOT NULL CHECK (relationship IN ('Friend','Family')),
                 drawn INTEGER NOT NULL DEFAULT 0 CHECK (drawn IN (0,1)),
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                auth_provider TEXT NOT NULL,
+                auth_subject TEXT NOT NULL,
+                email TEXT NOT NULL,
+                display_name TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+                UNIQUE (auth_provider, auth_subject)
             );
             """
         )
@@ -152,6 +173,58 @@ def _pick_random_name(relationship: Relationship) -> str:
 
     return chosen_name
 
+def get_or_create_user(
+    auth_provider: str,
+    auth_subject: str,
+    email: str,
+    display_name: str | None = None,
+) -> User:
+
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO users (
+                auth_provider,
+                auth_subject,
+                email,
+                display_name
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(auth_provider, auth_subject)
+            DO UPDATE SET
+                email = excluded.email,
+                display_name = excluded.display_name;
+            """,
+            (
+                auth_provider,
+                auth_subject,
+                email,
+                display_name,
+            ),
+        )
+
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                auth_provider,
+                auth_subject,
+                email,
+                display_name
+            FROM users
+            WHERE auth_provider = ?
+              AND auth_subject = ?;
+            """,
+            (auth_provider, auth_subject),
+        ).fetchone()
+
+    return User(
+        id=row[0],
+        auth_provider=row[1],
+        auth_subject=row[2],
+        email=row[3],
+        display_name=row[4],
+    )
 
 @dataclass
 class DrawResult:

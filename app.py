@@ -2,7 +2,7 @@
 # App Configuration (app.py)
 ####################
 import streamlit as st
-from db import init_db
+from db import init_db, get_or_create_user
 from ui_theme import inject_theme
 
 APP_NAME = "InTouch"
@@ -18,6 +18,8 @@ st.set_page_config(
     layout="centered",
 )
 
+init_db()
+
 # -------------------------
 # Authentication
 # -------------------------
@@ -31,10 +33,16 @@ if not st.user.is_logged_in:
 
     st.stop()
 
+current_user = get_or_create_user(
+    auth_provider="google",
+    auth_subject=st.user.sub,
+    email=st.user.email,
+    display_name=st.user.name,
+)
 
-st.success(f"Logged in as {st.user.name}")
-st.write(f"Email: {st.user.email}")
-st.write("Google user ID:", st.user.sub)
+st.success(f"Logged in as {current_user.display_name}")
+st.write(f"Email: {current_user.email}")
+st.write("InTouch user ID:", current_user.id)
 
 if st.button("Log out"):
     st.logout()
@@ -45,7 +53,7 @@ l, c, r = st.columns([1, 1, 1])
 with c:
     st.image(image_path)
 
-init_db()
+
 
 # -------------------------------------------------
 # Styles
