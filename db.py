@@ -1173,13 +1173,12 @@ def get_or_create_today_draw(
     user_id: int,
 ) -> DrawResult:
     """
-    Return today's existing draw for this user.
+    Return today's draw for this user.
 
-    If today's draw already exists, make sure those
-    people are still marked as drawn for the current
-    cycle.
+    If today's saved Friend or Family member has since
+    been deleted, replace only the missing selection.
 
-    If no draw exists yet today, create one and save it.
+    If no draw exists today, create and save one.
     """
 
     today = date.today().isoformat()
@@ -1194,9 +1193,7 @@ def get_or_create_today_draw(
             SELECT
                 friend_name,
                 family_name
-
             FROM daily_draws
-
             WHERE user_id = ?
               AND draw_date = ?;
             """,
@@ -1208,31 +1205,116 @@ def get_or_create_today_draw(
 
 
     # -------------------------------------------------
-    # TODAY'S DRAW ALREADY EXISTS
+    # NO DRAW EXISTS TODAY
     # -------------------------------------------------
 
-    if row is not None:
+    if row is None:
 
-        friend_name = row["friend_name"]
-        family_name = row["family_name"]
-
-        # Make sure today's selected people are still
-        # represented in the current draw-cycle state.
-        #
-        # This protects against resets or other actions
-        # causing today's saved draw and "drawn" status
-        # to fall out of sync.
+        result = draw_friend_and_family(
+            user_id
+        )
 
         with _connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO daily_draws (
+                    user_id,
+                    draw_date,
+                    friend_name,
+                    family_name
+                )
+                VALUES (?, ?, ?, ?);
+                """,
+                (
+                    user_id,
+                    today,
+                    result.friend,
+                    result.family,
+                ),
+            )
 
+        return result
+
+
+    # -------------------------------------------------
+    # EXISTING DRAW
+    # -------------------------------------------------
+
+    friend_name = row["friend_name"]
+    family_name = row["family_name"]
+
+
+    # Check whether today's selected people
+    # still exist in this user's lists.
+    with _connect() as conn:
+
+        friend_exists = conn.execute(
+            """
+            SELECT 1
+            FROM people
+            WHERE user_id = ?
+              AND relationship = 'Friend'
+              AND name = ?;
+            """,
+            (
+                user_id,
+                friend_name,
+            ),
+        ).fetchone() is not None
+
+
+        family_exists = conn.execute(
+            """
+            SELECT 1
+            FROM people
+            WHERE user_id = ?
+              AND relationship = 'Family'
+              AND name = ?;
+            """,
+            (
+                user_id,
+                family_name,
+            ),
+        ).fetchone() is not None
+
+
+    # -------------------------------------------------
+    # REPLACE DELETED FRIEND
+    # -------------------------------------------------
+
+    if not friend_exists:
+
+        friend_name = _pick_random_name(
+            user_id,
+            "Friend",
+        )
+
+
+    # -------------------------------------------------
+    # REPLACE DELETED FAMILY MEMBER
+    # -------------------------------------------------
+
+    if not family_exists:
+
+        family_name = _pick_random_name(
+            user_id,
+            "Family",
+        )
+
+
+    # -------------------------------------------------
+    # KEEP EXISTING VALID PICKS IN SYNC
+    # -------------------------------------------------
+
+    with _connect() as conn:
+
+        if friend_exists:
             conn.execute(
                 """
                 UPDATE people
-
                 SET
                     drawn = 1,
                     last_drawn_date = ?
-
                 WHERE user_id = ?
                   AND relationship = 'Friend'
                   AND name = ?;
@@ -1244,14 +1326,14 @@ def get_or_create_today_draw(
                 ),
             )
 
+
+        if family_exists:
             conn.execute(
                 """
                 UPDATE people
-
                 SET
                     drawn = 1,
                     last_drawn_date = ?
-
                 WHERE user_id = ?
                   AND relationship = 'Family'
                   AND name = ?;
@@ -1264,10 +1346,30 @@ def get_or_create_today_draw(
             )
 
 
-        return DrawResult(
-            friend=friend_name,
-            family=family_name,
+        # Save any repaired selections back into
+        # today's daily_draws record.
+        conn.execute(
+            """
+            UPDATE daily_draws
+            SET
+                friend_name = ?,
+                family_name = ?
+            WHERE user_id = ?
+              AND draw_date = ?;
+            """,
+            (
+                friend_name,
+                family_name,
+                user_id,
+                today,
+            ),
         )
+
+
+    return DrawResult(
+        friend=friend_name,
+        family=family_name,
+    )
 
 
     # -------------------------------------------------
