@@ -282,7 +282,10 @@ family_total = counts["Family"]["total"]
 # BRAND-NEW USER ONBOARDING
 # -------------------------------------------------
 
-@st.dialog("Welcome to InTouch")
+@st.dialog(
+        "Welcome to InTouch",
+        dismissible=False,
+)
 def new_user_dialog() -> None:
 
     st.write(
@@ -424,16 +427,25 @@ def new_user_dialog() -> None:
 # MISSING ACTIVE GROUP DIALOG
 # -------------------------------------------------
 
-@st.dialog("Add someone to continue")
+@st.dialog(
+    "Add someone to continue",
+    dismissible=False,
+)
 def missing_group_dialog(
     needs_friend: bool,
     needs_family: bool,
 ) -> None:
 
+    # ---------------------------------
+    # MESSAGE
+    # ---------------------------------
+
     if needs_friend and needs_family:
 
         st.write(
-            "Let’s add someone to each of your active lists."
+            "Your active lists are empty. "
+            "Add someone, or choose a group "
+            "you no longer want InTouch to include."
         )
 
     elif needs_friend:
@@ -450,6 +462,10 @@ def missing_group_dialog(
             "Family in your daily connections."
         )
 
+
+    # ---------------------------------
+    # ADD PERSON FORM
+    # ---------------------------------
 
     with st.form("missing_group_form"):
 
@@ -533,6 +549,53 @@ def missing_group_dialog(
 
                 return
 
+
+            st.rerun()
+
+
+    # ---------------------------------
+    # STOP INCLUDING GROUP
+    # ---------------------------------
+
+    st.markdown("---")
+
+
+    if needs_family:
+
+        st.caption(
+            "Don't want Family included anymore?"
+        )
+
+        if st.button(
+            "Stop including Family",
+            use_container_width=True,
+        ):
+
+            set_user_groups(
+                current_user.id,
+                use_friends=current_user.use_friends,
+                use_family=False,
+            )
+
+            st.rerun()
+
+
+    if needs_friend:
+
+        st.caption(
+            "Don't want Friends included anymore?"
+        )
+
+        if st.button(
+            "Stop including Friends",
+            use_container_width=True,
+        ):
+
+            set_user_groups(
+                current_user.id,
+                use_friends=False,
+                use_family=current_user.use_family,
+            )
 
             st.rerun()
 

@@ -12,6 +12,7 @@ from db import (
     upsert_people,
     reset_drawn,
     reset_prev,
+    set_user_groups,
 )
 from ui_theme import inject_theme
 
@@ -95,84 +96,151 @@ if draft_key not in st.session_state:
 # ---------------------------------------------------
 
 @st.dialog("Add new person")
-def add_person_dialog():
+def add_person_dialog() -> None:
 
-    with st.form("add_person_form"):
+    name = st.text_input(
+        "Name",
+        placeholder="Enter their name",
+    )
 
-        name = st.text_input(
-            "Name",
-            placeholder="Enter their name",
-        )
+    relationship = st.selectbox(
+        "Relationship",
+        options=[
+            "Friend",
+            "Family",
+        ],
+    )
 
-        relationship = st.selectbox(
-            "Relationship",
-            ["Friend", "Family"],
-        )
 
-        submitted = st.form_submit_button(
-            "Add person",
-            icon=":material/person_add:",
-            use_container_width=True,
-        )
+    if st.button(
+        "Add person",
+        icon=":material/person_add:",
+        use_container_width=True,
+        type="primary",
+    ):
 
-        if submitted:
+        # ---------------------------------
+        # VALIDATION
+        # ---------------------------------
 
-            name = name.strip()
+        clean_name = name.strip()
 
-            if not name:
-                st.error("Please enter a name.")
-                return
+        if not clean_name:
 
-            draft = st.session_state[draft_key].copy()
-
-            # Prevent duplicates within the same relationship.
-            duplicate = (
-                (
-                    draft["name"]
-                    .astype(str)
-                    .str.strip()
-                    .str.casefold()
-                    == name.casefold()
-                )
-                &
-                (
-                    draft["relationship"]
-                    == relationship
-                )
-            ).any()
-
-            if duplicate:
-                st.error(
-                    f"{name} already exists in your "
-                    f"{relationship} list."
-                )
-                return
-
-            new_person = pd.DataFrame(
-                [
-                    {
-                        "id": pd.NA,
-                        "name": name,
-                        "relationship": relationship,
-                        "drawn": 0,
-                        "last_drawn_date": None,
-
-                        # Temporary identifier.
-                        # This never goes into SQLite.
-                        "_draft_id": f"new:{uuid.uuid4()}",
-                    }
-                ]
+            st.error(
+                "Please enter a name."
             )
 
-            st.session_state[draft_key] = pd.concat(
-                [
-                    draft,
-                    new_person,
+            return
+
+
+        # ---------------------------------
+        # DUPLICATE CHECK
+        # ---------------------------------
+
+        draft = st.session_state[
+            draft_key
+        ]
+
+
+        duplicate = draft[
+            (
+                draft["name"]
+                .astype(str)
+                .str.strip()
+                .str.casefold()
+                == clean_name.casefold()
+            )
+            &
+            (
+                draft["relationship"]
+                == relationship
+            )
+        ]
+
+
+        if not duplicate.empty:
+
+            st.error(
+                f"{clean_name} is already in your "
+                f"{relationship} list."
+            )
+
+            return
+
+
+        # ---------------------------------
+        # ADD TO DRAFT
+        # ---------------------------------
+
+        new_row = pd.DataFrame(
+            [
+                {
+                    "_draft_id": (
+                        f"new:{uuid.uuid4()}"
+                    ),
+
+                    "id": None,
+
+                    "name": clean_name,
+
+                    "relationship": (
+                        relationship
+                    ),
+
+                    "drawn": 0,
+
+                    "last_drawn_date": None,
+                }
+            ]
+        )
+
+
+        st.session_state[
+            draft_key
+        ] = pd.concat(
+            [
+                st.session_state[
+                    draft_key
                 ],
-                ignore_index=True,
-            )
+                new_row,
+            ],
+            ignore_index=True,
+        )
 
-            st.rerun()
+
+        # ---------------------------------
+        # ENABLE GROUP ON SAVE
+        # ---------------------------------
+        # If this group is currently disabled,
+        # adding someone to it is treated as
+        # intent to start using it again.
+        #
+        # We do NOT update the database yet.
+        # This remains part of the draft until
+        # Save changes is clicked.
+
+        if (
+            relationship == "Friend"
+            and not current_user.use_friends
+        ):
+
+            st.session_state[
+                "enable_friends_on_save"
+            ] = True
+
+
+        if (
+            relationship == "Family"
+            and not current_user.use_family
+        ):
+
+            st.session_state[
+                "enable_family_on_save"
+            ] = True
+
+
+        st.rerun()
 
 @st.dialog("Remove person")
 def remove_person_dialog():
