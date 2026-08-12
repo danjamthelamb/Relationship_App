@@ -68,30 +68,67 @@ st.markdown(
     margin-top: 1rem;
 }
 
+.feature-grid {
+    max-width: 560px;
+    margin: 1.6rem auto;
 
-.bullet-wrap {
-    max-width: 520px;
-    margin: 1.1rem auto;
-    padding: 0.9rem 1.2rem;
-    border-radius: 14px;
-
-    background: rgba(121, 201, 197, 0.22);
-    border: 1px solid rgba(63, 154, 174, 0.35);
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.8rem;
 
     text-align: left;
 }
 
 
-.bullet-wrap ul {
-    list-style-type: disc;
-    list-style-position: outside;
-    padding-left: 1.2rem;
-    margin: 0;
+.feature-card {
+    padding: 1rem 1.1rem;
+
+    border-radius: 16px;
+
+    background: rgba(121, 201, 197, 0.16);
+    border: 1px solid rgba(63, 154, 174, 0.28);
+
+    box-shadow: 0 6px 14px rgba(63, 154, 174, 0.06);
 }
 
 
-.bullet-wrap li {
-    margin: 0.4rem 0;
+.feature-kicker {
+    margin-bottom: 0.3rem;
+
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+
+    color: #3F9AAE;
+}
+
+
+.feature-title {
+    margin-bottom: 0.3rem;
+
+    font-size: 1.05rem;
+    font-weight: 800;
+
+    color: #1F2937;
+}
+
+
+.feature-copy {
+    margin: 0;
+
+    font-size: 0.9rem;
+    line-height: 1.45;
+
+    opacity: 0.72;
+}
+
+
+/* Stack gracefully on narrow screens */
+@media (max-width: 600px) {
+    .feature-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 
@@ -148,7 +185,7 @@ A gentle way to stay connected.
 </p>
 
 <p class="body">
-<strong>{APP_NAME}</strong> helps people stay meaningfully connected —
+<strong>{APP_NAME}</strong> helps people stay meaningfully connected
 <br>
 without relying on memory, guilt, or social media noise.
 </p>
@@ -159,13 +196,40 @@ Instead of asking <em>“Who should I text today?”</em>
 {APP_NAME} gently chooses for you.
 </p>
 
-<div class="bullet-wrap">
-<ul>
-<li>One friend</li>
-<li>One family member</li>
-<li>No repeats until everyone has been reached</li>
-<li>No pressure, no feeds, no algorithms</li>
-</ul>
+<div class="feature-grid">
+
+<div class="feature-card">
+<div class="feature-kicker">Friend</div>
+<div class="feature-title">One friend</div>
+<p class="feature-copy">
+A simple daily nudge toward someone you care about.
+</p>
+</div>
+
+<div class="feature-card">
+<div class="feature-kicker">Family</div>
+<div class="feature-title">One family member</div>
+<p class="feature-copy">
+Keep family connections in the rhythm, too.
+</p>
+</div>
+
+<div class="feature-card">
+<div class="feature-kicker">Thoughtful rotation</div>
+<div class="feature-title">No repeats</div>
+<p class="feature-copy">
+Everyone gets a turn before the list begins again.
+</p>
+</div>
+
+<div class="feature-card">
+<div class="feature-kicker">Keep it simple</div>
+<div class="feature-title">No feeds. No pressure.</div>
+<p class="feature-copy">
+Just a small daily prompt, then get on with your day.
+</p>
+</div>
+
 </div>
 
 <p class="closing">
