@@ -37,15 +37,6 @@ st.success(
     f"Logged in as {current_user.display_name}"
 )
 
-st.write(
-    f"Email: {current_user.email}"
-)
-
-st.write(
-    "InTouch user ID:",
-    current_user.id,
-)
-
 
 logout_button()
 

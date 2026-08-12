@@ -1,26 +1,25 @@
 [theme]
 base = "light"
 
-# Main action color (Draw names)
+# Main action color
 primaryColor = "#F96E5B"
 
-# Page background (warm, not white)
+# Page background
 backgroundColor = "#FFF7E6"
 
-# Cards, containers, metrics
+# Cards / containers
 secondaryBackgroundColor = "#FFE2AF"
 
-# Main text (don’t use pure black)
+# Main text
 textColor = "#1F2937"
 
 font = "sans serif"
 
 
-[ui]
-hideSidebarNav = true
-
 [client]
+showSidebarNavigation = false
 toolbarMode = "minimal"
+
 
 [server]
 headless = true
