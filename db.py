@@ -16,6 +16,10 @@ import pandas as pd
 Relationship = Literal["Friend", "Family"]
 
 
+# -------------------------------------------------
+# DATA CLASSES
+# -------------------------------------------------
+
 @dataclass(frozen=True)
 class User:
     id: int
@@ -23,13 +27,19 @@ class User:
     auth_subject: str
     email: str
     display_name: str | None
+    use_friends: bool
+    use_family: bool
 
 
 @dataclass
 class DrawResult:
-    friend: str
-    family: str
+    friend: str | None
+    family: str | None
 
+
+# -------------------------------------------------
+# DATABASE PATH
+# -------------------------------------------------
 
 DB_PATH = Path("data") / "texter.sqlite"
 
@@ -47,15 +57,20 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
-    # SQLite requires this on each connection
-    # for foreign keys to actually be enforced.
-    conn.execute("PRAGMA foreign_keys = ON;")
+    conn.execute(
+        "PRAGMA foreign_keys = ON;"
+    )
 
     return conn
 
 
-# -------------------------------------------------
+# =================================================
 # MIGRATIONS
+# =================================================
+
+
+# -------------------------------------------------
+# OLD SINGLE-USER PEOPLE TABLE
 # -------------------------------------------------
 
 def _migrate_people_to_multiuser(
@@ -81,6 +96,7 @@ def _migrate_people_to_multiuser(
     if not people_exists:
         return
 
+
     columns = {
         row["name"]
         for row in conn.execute(
@@ -88,9 +104,11 @@ def _migrate_people_to_multiuser(
         ).fetchall()
     }
 
-    # Already migrated.
+
+    # Already multi-user.
     if "user_id" in columns:
         return
+
 
     legacy_owner = conn.execute(
         """
@@ -101,25 +119,29 @@ def _migrate_people_to_multiuser(
         """
     ).fetchone()
 
+
     if legacy_owner is None:
         raise RuntimeError(
             "Cannot migrate existing people because "
             "no InTouch user exists."
         )
 
+
     legacy_user_id = legacy_owner["id"]
+
 
     # Remove old global uniqueness rule.
     conn.execute(
         "DROP INDEX IF EXISTS ux_people_rel_name;"
     )
 
-    # Clean up any failed prior attempt.
+
+    # Clean up failed migration attempts.
     conn.execute(
         "DROP TABLE IF EXISTS people_new;"
     )
 
-    # Create new multi-user structure.
+
     conn.execute(
         """
         CREATE TABLE people_new (
@@ -131,7 +153,10 @@ def _migrate_people_to_multiuser(
 
             relationship TEXT NOT NULL
                 CHECK (
-                    relationship IN ('Friend', 'Family')
+                    relationship IN (
+                        'Friend',
+                        'Family'
+                    )
                 ),
 
             drawn INTEGER NOT NULL DEFAULT 0
@@ -151,8 +176,9 @@ def _migrate_people_to_multiuser(
         """
     )
 
-    # Preserve last_drawn_date if an older DB
-    # somehow already contains it.
+
+    # Preserve last_drawn_date if the old table
+    # already happened to contain it.
     if "last_drawn_date" in columns:
 
         conn.execute(
@@ -166,6 +192,7 @@ def _migrate_people_to_multiuser(
                 last_drawn_date,
                 created_at
             )
+
             SELECT
                 id,
                 ?,
@@ -174,6 +201,7 @@ def _migrate_people_to_multiuser(
                 drawn,
                 last_drawn_date,
                 created_at
+
             FROM people;
             """,
             (legacy_user_id,),
@@ -192,6 +220,7 @@ def _migrate_people_to_multiuser(
                 last_drawn_date,
                 created_at
             )
+
             SELECT
                 id,
                 ?,
@@ -200,22 +229,25 @@ def _migrate_people_to_multiuser(
                 drawn,
                 NULL,
                 created_at
+
             FROM people;
             """,
             (legacy_user_id,),
         )
 
-    # Replace old table.
+
     conn.execute(
         "DROP TABLE people;"
     )
 
     conn.execute(
-        "ALTER TABLE people_new RENAME TO people;"
+        """
+        ALTER TABLE people_new
+        RENAME TO people;
+        """
     )
 
-    # Names only need to be unique within
-    # one user's relationship list.
+
     conn.execute(
         """
         CREATE UNIQUE INDEX ux_people_user_rel_name
@@ -228,12 +260,16 @@ def _migrate_people_to_multiuser(
     )
 
 
+# -------------------------------------------------
+# LAST DRAWN DATE
+# -------------------------------------------------
+
 def _migrate_add_last_drawn_date(
     conn: sqlite3.Connection,
 ) -> None:
     """
-    Add last_drawn_date to an existing multi-user
-    people table if it does not already exist.
+    Add last_drawn_date to an existing people table
+    if it does not already exist.
     """
 
     columns = {
@@ -243,8 +279,10 @@ def _migrate_add_last_drawn_date(
         ).fetchall()
     }
 
+
     if "last_drawn_date" in columns:
         return
+
 
     conn.execute(
         """
@@ -255,15 +293,180 @@ def _migrate_add_last_drawn_date(
 
 
 # -------------------------------------------------
-# DATABASE INITIALIZATION
+# USER GROUP PREFERENCES
 # -------------------------------------------------
 
+def _migrate_user_group_preferences(
+    conn: sqlite3.Connection,
+) -> None:
+    """
+    Add Friend/Family preference flags to existing
+    users tables.
+
+    Existing users default to both enabled.
+    """
+
+    columns = {
+        row["name"]
+        for row in conn.execute(
+            "PRAGMA table_info(users);"
+        ).fetchall()
+    }
+
+
+    if "use_friends" not in columns:
+
+        conn.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN use_friends
+                INTEGER NOT NULL DEFAULT 1
+                CHECK (use_friends IN (0, 1));
+            """
+        )
+
+
+    if "use_family" not in columns:
+
+        conn.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN use_family
+                INTEGER NOT NULL DEFAULT 1
+                CHECK (use_family IN (0, 1));
+            """
+        )
+
+
+# -------------------------------------------------
+# DAILY DRAWS NULLABLE CATEGORIES
+# -------------------------------------------------
+
+def _migrate_daily_draws_nullable(
+    conn: sqlite3.Connection,
+) -> None:
+    """
+    Older daily_draws tables required both
+    friend_name and family_name.
+
+    Friends-only and Family-only users require those
+    fields to be nullable.
+    """
+
+    table_exists = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'daily_draws';
+        """
+    ).fetchone()
+
+
+    if not table_exists:
+        return
+
+
+    table_info = conn.execute(
+        "PRAGMA table_info(daily_draws);"
+    ).fetchall()
+
+
+    columns = {
+        row["name"]: row
+        for row in table_info
+    }
+
+
+    friend_not_null = (
+        "friend_name" in columns
+        and columns["friend_name"]["notnull"] == 1
+    )
+
+    family_not_null = (
+        "family_name" in columns
+        and columns["family_name"]["notnull"] == 1
+    )
+
+
+    # Already supports NULL.
+    if not friend_not_null and not family_not_null:
+        return
+
+
+    conn.execute(
+        "DROP TABLE IF EXISTS daily_draws_new;"
+    )
+
+
+    conn.execute(
+        """
+        CREATE TABLE daily_draws_new (
+            user_id INTEGER NOT NULL,
+
+            draw_date TEXT NOT NULL,
+
+            friend_name TEXT,
+
+            family_name TEXT,
+
+            PRIMARY KEY (
+                user_id,
+                draw_date
+            ),
+
+            FOREIGN KEY (user_id)
+                REFERENCES users(id)
+                ON DELETE CASCADE
+        );
+        """
+    )
+
+
+    conn.execute(
+        """
+        INSERT INTO daily_draws_new (
+            user_id,
+            draw_date,
+            friend_name,
+            family_name
+        )
+
+        SELECT
+            user_id,
+            draw_date,
+            friend_name,
+            family_name
+
+        FROM daily_draws;
+        """
+    )
+
+
+    conn.execute(
+        "DROP TABLE daily_draws;"
+    )
+
+
+    conn.execute(
+        """
+        ALTER TABLE daily_draws_new
+        RENAME TO daily_draws;
+        """
+    )
+
+
+# =================================================
+# DATABASE INITIALIZATION
+# =================================================
+
 def init_db() -> None:
+
     with _connect() as conn:
 
-        # -------------------------
-        # Users
-        # -------------------------
+        # -----------------------------------------
+        # USERS
+        # -----------------------------------------
 
         conn.execute(
             """
@@ -278,6 +481,16 @@ def init_db() -> None:
 
                 display_name TEXT,
 
+                use_friends INTEGER NOT NULL DEFAULT 1
+                    CHECK (
+                        use_friends IN (0, 1)
+                    ),
+
+                use_family INTEGER NOT NULL DEFAULT 1
+                    CHECK (
+                        use_family IN (0, 1)
+                    ),
+
                 created_at TEXT NOT NULL
                     DEFAULT CURRENT_TIMESTAMP,
 
@@ -290,9 +503,13 @@ def init_db() -> None:
         )
 
 
-        # -------------------------
-        # People
-        # -------------------------
+        # Upgrade existing users table.
+        _migrate_user_group_preferences(conn)
+
+
+        # -----------------------------------------
+        # PEOPLE
+        # -----------------------------------------
 
         people_exists = conn.execute(
             """
@@ -302,6 +519,7 @@ def init_db() -> None:
               AND name = 'people';
             """
         ).fetchone()
+
 
         if people_exists:
 
@@ -344,18 +562,16 @@ def init_db() -> None:
             )
 
 
-        # Existing multi-user DBs may not have
-        # last_drawn_date yet.
         _migrate_add_last_drawn_date(conn)
 
 
-        # Remove old single-user index if present.
+        # Remove old single-user uniqueness rule.
         conn.execute(
             "DROP INDEX IF EXISTS ux_people_rel_name;"
         )
 
 
-        # Multi-user uniqueness rule.
+        # User-specific uniqueness rule.
         conn.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS
@@ -370,9 +586,9 @@ def init_db() -> None:
         )
 
 
-        # -------------------------
-        # Meta
-        # -------------------------
+        # -----------------------------------------
+        # META
+        # -----------------------------------------
 
         conn.execute(
             """
@@ -383,17 +599,21 @@ def init_db() -> None:
             """
         )
 
-        # -------------------------
-        # Daily Draws
-        # -------------------------
+
+        # -----------------------------------------
+        # DAILY DRAWS
+        # -----------------------------------------
 
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS daily_draws (
                 user_id INTEGER NOT NULL,
+
                 draw_date TEXT NOT NULL,
-                friend_name TEXT NOT NULL,
-                family_name TEXT NOT NULL,
+
+                friend_name TEXT,
+
+                family_name TEXT,
 
                 PRIMARY KEY (
                     user_id,
@@ -408,9 +628,12 @@ def init_db() -> None:
         )
 
 
-# -------------------------------------------------
+        _migrate_daily_draws_nullable(conn)
+
+
+# =================================================
 # USERS
-# -------------------------------------------------
+# =================================================
 
 def get_or_create_user(
     auth_provider: str,
@@ -428,7 +651,9 @@ def get_or_create_user(
                 auth_provider,
                 auth_subject,
                 email,
-                display_name
+                display_name,
+                use_friends,
+                use_family
 
             FROM users
 
@@ -452,6 +677,7 @@ def get_or_create_user(
                     email,
                     display_name
                 )
+
                 VALUES (?, ?, ?, ?);
                 """,
                 (
@@ -468,7 +694,8 @@ def get_or_create_user(
 
             user_id = row["id"]
 
-            # Keep Google profile info current.
+
+            # Keep Google profile information current.
             conn.execute(
                 """
                 UPDATE users
@@ -494,7 +721,9 @@ def get_or_create_user(
                 auth_provider,
                 auth_subject,
                 email,
-                display_name
+                display_name,
+                use_friends,
+                use_family
 
             FROM users
 
@@ -510,12 +739,90 @@ def get_or_create_user(
         auth_subject=row["auth_subject"],
         email=row["email"],
         display_name=row["display_name"],
+        use_friends=bool(row["use_friends"]),
+        use_family=bool(row["use_family"]),
     )
 
 
+def set_user_groups(
+    user_id: int,
+    use_friends: bool,
+    use_family: bool,
+) -> None:
+    """
+    Set which relationship groups participate
+    in this user's InTouch experience.
+
+    At least one must remain enabled.
+    """
+
+    if not use_friends and not use_family:
+
+        raise ValueError(
+            "Choose at least Friends or Family."
+        )
+
+
+    with _connect() as conn:
+
+        conn.execute(
+            """
+            UPDATE users
+
+            SET
+                use_friends = ?,
+                use_family = ?
+
+            WHERE id = ?;
+            """,
+            (
+                int(use_friends),
+                int(use_family),
+                user_id,
+            ),
+        )
+
+
 # -------------------------------------------------
+# INTERNAL USER PREFERENCE LOOKUP
+# -------------------------------------------------
+
+def _get_user_groups(
+    user_id: int,
+) -> tuple[bool, bool]:
+
+    with _connect() as conn:
+
+        row = conn.execute(
+            """
+            SELECT
+                use_friends,
+                use_family
+
+            FROM users
+
+            WHERE id = ?;
+            """,
+            (user_id,),
+        ).fetchone()
+
+
+    if row is None:
+
+        raise ValueError(
+            "InTouch user not found."
+        )
+
+
+    return (
+        bool(row["use_friends"]),
+        bool(row["use_family"]),
+    )
+
+
+# =================================================
 # PEOPLE
-# -------------------------------------------------
+# =================================================
 
 def get_people_df(
     user_id: int,
@@ -556,6 +863,7 @@ def get_counts(
     with _connect() as conn:
 
         out = {}
+
 
         for relationship in (
             "Friend",
@@ -612,15 +920,19 @@ def add_person(
 
     name = name.strip()
 
+
     if not name:
+
         raise ValueError(
             "Name cannot be empty."
         )
+
 
     if relationship not in (
         "Friend",
         "Family",
     ):
+
         raise ValueError(
             "Relationship must be Friend or Family."
         )
@@ -669,16 +981,16 @@ def upsert_people(
         relationship
         drawn
 
-    last_drawn_date is intentionally NOT updated
-    here. It is maintained only by the draw logic.
+    last_drawn_date is deliberately maintained
+    by the drawing system instead of the editor.
     """
 
     df = df.copy()
 
 
-    # -------------------------
-    # Cleanup
-    # -------------------------
+    # -----------------------------------------
+    # CLEANUP
+    # -----------------------------------------
 
     df["name"] = (
         df["name"]
@@ -686,14 +998,15 @@ def upsert_people(
         .str.strip()
     )
 
+
     df = df[
         df["name"] != ""
     ]
 
 
-    # -------------------------
-    # Validation
-    # -------------------------
+    # -----------------------------------------
+    # VALIDATION
+    # -----------------------------------------
 
     invalid_relationships = df[
         ~df["relationship"].isin(
@@ -703,6 +1016,7 @@ def upsert_people(
             ]
         )
     ]
+
 
     if not invalid_relationships.empty:
 
@@ -715,8 +1029,6 @@ def upsert_people(
 
         with _connect() as conn:
 
-            # Existing records belonging ONLY
-            # to this user.
             existing_ids = {
                 row["id"]
 
@@ -733,7 +1045,6 @@ def upsert_people(
             }
 
 
-            # IDs present in the submitted draft.
             incoming_ids = {
                 int(value)
 
@@ -746,13 +1057,14 @@ def upsert_people(
             }
 
 
-            # -------------------------
-            # Deletes
-            # -------------------------
+            # ---------------------------------
+            # DELETE
+            # ---------------------------------
 
             to_delete = sorted(
                 existing_ids - incoming_ids
             )
+
 
             if to_delete:
 
@@ -775,9 +1087,9 @@ def upsert_people(
                 )
 
 
-            # -------------------------
-            # Inserts / Updates
-            # -------------------------
+            # ---------------------------------
+            # INSERT / UPDATE
+            # ---------------------------------
 
             for _, row in df.iterrows():
 
@@ -787,13 +1099,16 @@ def upsert_people(
                     else None
                 )
 
+
                 name = str(
                     row["name"]
                 ).strip()
 
+
                 relationship = row[
                     "relationship"
                 ]
+
 
                 drawn = (
                     int(row["drawn"])
@@ -809,9 +1124,9 @@ def upsert_people(
                 )
 
 
-                # -------------------------
-                # Insert
-                # -------------------------
+                # -----------------------------
+                # INSERT
+                # -----------------------------
 
                 if rid is None or rid == 0:
 
@@ -835,9 +1150,9 @@ def upsert_people(
                     )
 
 
-                # -------------------------
-                # Update
-                # -------------------------
+                # -----------------------------
+                # UPDATE
+                # -----------------------------
 
                 else:
 
@@ -871,9 +1186,9 @@ def upsert_people(
         ) from e
 
 
-# -------------------------------------------------
+# =================================================
 # META
-# -------------------------------------------------
+# =================================================
 
 def _get_meta(
     user_id: int,
@@ -938,20 +1253,20 @@ def _set_meta(
         )
 
 
-# -------------------------------------------------
+# =================================================
 # DRAWING
-# -------------------------------------------------
+# =================================================
 
 def reset_if_needed(
     user_id: int,
     relationship: Relationship,
 ) -> None:
     """
-    If every person in one of this user's
-    relationship lists has been drawn,
-    reset drawn = 0 for that list.
+    If every person in one relationship group has
+    already been drawn, begin a new cycle for that
+    group only.
 
-    last_drawn_date is intentionally preserved.
+    last_drawn_date is preserved.
     """
 
     with _connect() as conn:
@@ -1017,13 +1332,12 @@ def _pick_random_name(
 ) -> str:
     """
     Pick a random undrawn person from this user's
-    relationship list.
+    selected relationship group.
 
     Avoid immediately repeating the previous person
     when possible.
 
-    Records today's local calendar date as
-    last_drawn_date.
+    Record today's date as last_drawn_date.
     """
 
     reset_if_needed(
@@ -1080,8 +1394,6 @@ def _pick_random_name(
     ]
 
 
-    # Avoid repeating the previous person
-    # if another candidate is available.
     if (
         prev_name
         and len(candidates) > 1
@@ -1098,6 +1410,7 @@ def _pick_random_name(
             )
         ]
 
+
         if filtered:
             candidates = filtered
 
@@ -1106,11 +1419,11 @@ def _pick_random_name(
         candidates
     )
 
+
     chosen_id = choice["id"]
     chosen_name = choice["name"]
 
 
-    # Local date only: YYYY-MM-DD
     today = date.today().isoformat()
 
 
@@ -1149,19 +1462,47 @@ def draw_friend_and_family(
     user_id: int,
 ) -> DrawResult:
     """
-    Draw one Friend and one Family member
-    for this user.
+    Create today's appropriate selection based on
+    which groups this user has enabled.
+
+    Examples:
+
+        Friends + Family:
+            friend = "Daniel"
+            family = "Mom"
+
+        Friends only:
+            friend = "Daniel"
+            family = None
+
+        Family only:
+            friend = None
+            family = "Mom"
     """
 
-    friend = _pick_random_name(
-        user_id,
-        "Friend",
+    use_friends, use_family = (
+        _get_user_groups(user_id)
     )
 
-    family = _pick_random_name(
-        user_id,
-        "Family",
-    )
+
+    friend = None
+    family = None
+
+
+    if use_friends:
+
+        friend = _pick_random_name(
+            user_id,
+            "Friend",
+        )
+
+
+    if use_family:
+
+        family = _pick_random_name(
+            user_id,
+            "Family",
+        )
 
 
     return DrawResult(
@@ -1169,31 +1510,47 @@ def draw_friend_and_family(
         family=family,
     )
 
+
+# -------------------------------------------------
+# DAILY DRAW
+# -------------------------------------------------
+
 def get_or_create_today_draw(
     user_id: int,
 ) -> DrawResult:
     """
-    Return today's draw for this user.
+    Return today's saved connections.
 
-    If today's saved Friend or Family member has since
-    been deleted, replace only the missing selection.
+    Behavior depends on the user's enabled groups.
 
-    If no draw exists today, create and save one.
+    If an existing selected person was deleted,
+    replace only that missing selection.
+
+    Disabled groups are stored as NULL.
     """
 
     today = date.today().isoformat()
 
-    # -------------------------------------------------
-    # CHECK FOR EXISTING DAILY DRAW
-    # -------------------------------------------------
+
+    use_friends, use_family = (
+        _get_user_groups(user_id)
+    )
+
+
+    # -----------------------------------------
+    # FIND TODAY'S SAVED DRAW
+    # -----------------------------------------
 
     with _connect() as conn:
+
         row = conn.execute(
             """
             SELECT
                 friend_name,
                 family_name
+
             FROM daily_draws
+
             WHERE user_id = ?
               AND draw_date = ?;
             """,
@@ -1204,9 +1561,9 @@ def get_or_create_today_draw(
         ).fetchone()
 
 
-    # -------------------------------------------------
+    # -----------------------------------------
     # NO DRAW EXISTS TODAY
-    # -------------------------------------------------
+    # -----------------------------------------
 
     if row is None:
 
@@ -1214,7 +1571,9 @@ def get_or_create_today_draw(
             user_id
         )
 
+
         with _connect() as conn:
+
             conn.execute(
                 """
                 INSERT INTO daily_draws (
@@ -1223,6 +1582,7 @@ def get_or_create_today_draw(
                     friend_name,
                     family_name
                 )
+
                 VALUES (?, ?, ?, ?);
                 """,
                 (
@@ -1233,127 +1593,170 @@ def get_or_create_today_draw(
                 ),
             )
 
+
         return result
 
 
-    # -------------------------------------------------
+    # -----------------------------------------
     # EXISTING DRAW
-    # -------------------------------------------------
+    # -----------------------------------------
 
-    friend_name = row["friend_name"]
-    family_name = row["family_name"]
-
-
-    # Check whether today's selected people
-    # still exist in this user's lists.
-    with _connect() as conn:
-
-        friend_exists = conn.execute(
-            """
-            SELECT 1
-            FROM people
-            WHERE user_id = ?
-              AND relationship = 'Friend'
-              AND name = ?;
-            """,
-            (
-                user_id,
-                friend_name,
-            ),
-        ).fetchone() is not None
+    friend_name = (
+        row["friend_name"]
+        if use_friends
+        else None
+    )
 
 
-        family_exists = conn.execute(
-            """
-            SELECT 1
-            FROM people
-            WHERE user_id = ?
-              AND relationship = 'Family'
-              AND name = ?;
-            """,
-            (
-                user_id,
-                family_name,
-            ),
-        ).fetchone() is not None
+    family_name = (
+        row["family_name"]
+        if use_family
+        else None
+    )
 
 
-    # -------------------------------------------------
-    # REPLACE DELETED FRIEND
-    # -------------------------------------------------
+    # -----------------------------------------
+    # FRIEND
+    # -----------------------------------------
 
-    if not friend_exists:
-
-        friend_name = _pick_random_name(
-            user_id,
-            "Friend",
-        )
+    friend_exists = False
 
 
-    # -------------------------------------------------
-    # REPLACE DELETED FAMILY MEMBER
-    # -------------------------------------------------
+    if use_friends and friend_name:
 
-    if not family_exists:
+        with _connect() as conn:
 
-        family_name = _pick_random_name(
-            user_id,
-            "Family",
-        )
+            friend_exists = (
+                conn.execute(
+                    """
+                    SELECT 1
 
+                    FROM people
 
-    # -------------------------------------------------
-    # KEEP EXISTING VALID PICKS IN SYNC
-    # -------------------------------------------------
-
-    with _connect() as conn:
-
-        if friend_exists:
-            conn.execute(
-                """
-                UPDATE people
-                SET
-                    drawn = 1,
-                    last_drawn_date = ?
-                WHERE user_id = ?
-                  AND relationship = 'Friend'
-                  AND name = ?;
-                """,
-                (
-                    today,
-                    user_id,
-                    friend_name,
-                ),
+                    WHERE user_id = ?
+                      AND relationship = 'Friend'
+                      AND name = ?;
+                    """,
+                    (
+                        user_id,
+                        friend_name,
+                    ),
+                ).fetchone()
+                is not None
             )
 
 
-        if family_exists:
-            conn.execute(
-                """
-                UPDATE people
-                SET
-                    drawn = 1,
-                    last_drawn_date = ?
-                WHERE user_id = ?
-                  AND relationship = 'Family'
-                  AND name = ?;
-                """,
-                (
-                    today,
-                    user_id,
-                    family_name,
-                ),
+    if use_friends:
+
+        if not friend_exists:
+
+            friend_name = _pick_random_name(
+                user_id,
+                "Friend",
+            )
+
+        else:
+
+            with _connect() as conn:
+
+                conn.execute(
+                    """
+                    UPDATE people
+
+                    SET
+                        drawn = 1,
+                        last_drawn_date = ?
+
+                    WHERE user_id = ?
+                      AND relationship = 'Friend'
+                      AND name = ?;
+                    """,
+                    (
+                        today,
+                        user_id,
+                        friend_name,
+                    ),
+                )
+
+
+    # -----------------------------------------
+    # FAMILY
+    # -----------------------------------------
+
+    family_exists = False
+
+
+    if use_family and family_name:
+
+        with _connect() as conn:
+
+            family_exists = (
+                conn.execute(
+                    """
+                    SELECT 1
+
+                    FROM people
+
+                    WHERE user_id = ?
+                      AND relationship = 'Family'
+                      AND name = ?;
+                    """,
+                    (
+                        user_id,
+                        family_name,
+                    ),
+                ).fetchone()
+                is not None
             )
 
 
-        # Save any repaired selections back into
-        # today's daily_draws record.
+    if use_family:
+
+        if not family_exists:
+
+            family_name = _pick_random_name(
+                user_id,
+                "Family",
+            )
+
+        else:
+
+            with _connect() as conn:
+
+                conn.execute(
+                    """
+                    UPDATE people
+
+                    SET
+                        drawn = 1,
+                        last_drawn_date = ?
+
+                    WHERE user_id = ?
+                      AND relationship = 'Family'
+                      AND name = ?;
+                    """,
+                    (
+                        today,
+                        user_id,
+                        family_name,
+                    ),
+                )
+
+
+    # -----------------------------------------
+    # SAVE REPAIRED / UPDATED DAILY DRAW
+    # -----------------------------------------
+
+    with _connect() as conn:
+
         conn.execute(
             """
             UPDATE daily_draws
+
             SET
                 friend_name = ?,
                 family_name = ?
+
             WHERE user_id = ?
               AND draw_date = ?;
             """,
@@ -1372,47 +1775,9 @@ def get_or_create_today_draw(
     )
 
 
-    # -------------------------------------------------
-    # NO DRAW EXISTS YET TODAY
-    # -------------------------------------------------
-
-    result = draw_friend_and_family(
-        user_id
-    )
-
-
-    # -------------------------------------------------
-    # SAVE TODAY'S DRAW
-    # -------------------------------------------------
-
-    with _connect() as conn:
-
-        conn.execute(
-            """
-            INSERT INTO daily_draws (
-                user_id,
-                draw_date,
-                friend_name,
-                family_name
-            )
-
-            VALUES (?, ?, ?, ?);
-            """,
-            (
-                user_id,
-                today,
-                result.friend,
-                result.family,
-            ),
-        )
-
-
-    return result
-
-
-# -------------------------------------------------
-# RESETS
-# -------------------------------------------------
+# =================================================
+# RESET DRAW STATE
+# =================================================
 
 def reset_drawn(
     user_id: int,

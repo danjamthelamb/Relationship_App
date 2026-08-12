@@ -11,6 +11,7 @@ from db import (
     add_person,
     get_counts,
     get_or_create_today_draw,
+    set_user_groups,
 )
 from ui_theme import (
     inject_theme,
@@ -44,6 +45,8 @@ inject_theme()
 # -------------------------------------------------
 
 current_user = require_user()
+
+
 st.success(
     f"Logged in as {current_user.display_name}"
 )
@@ -81,7 +84,7 @@ def get_daily_quote() -> dict:
     Return one stable quote for the current date.
 
     The quote changes from day to day,
-    but does not change when the page refreshes.
+    but not when the page refreshes.
     """
 
     rng = random.Random(
@@ -102,24 +105,12 @@ st.markdown(
 /* --------------------------------
    Section headings
 -------------------------------- */
-303
-.....33..
 
-.3.+..
-.0103
-03.+1..030..03.+3
-.06..3+01
 .section-title {
     font-size: 1.65rem;
     font-weight: 800;
     margin-top: 1.2rem;
     margin-bottom: 0.25rem;
-}
-
-.section-subtitle {
-    opacity: 0.67;
-    margin-top: 0;
-    margin-bottom: 1rem;
 }
 
 
@@ -133,6 +124,7 @@ st.markdown(
     margin-top: 0.8rem;
 }
 
+
 .connection-card {
     flex: 1;
     padding: 1.1rem 1.2rem;
@@ -144,12 +136,14 @@ st.markdown(
     box-shadow: 0 8px 18px rgba(63, 154, 174, 0.08);
 }
 
+
 .connection-type {
     font-size: 0.9rem;
     font-weight: 600;
     opacity: 0.68;
     margin-bottom: 0.2rem;
 }
+
 
 .connection-name {
     font-size: 1.55rem;
@@ -172,6 +166,7 @@ st.markdown(
     color: #6F4F3D;
 }
 
+
 .daily-quote-author {
     margin-top: 0.35rem;
     font-size: 0.85rem;
@@ -193,7 +188,7 @@ st.markdown(
 
 
 /* --------------------------------
-   Progress cards
+   Progress
 -------------------------------- */
 
 .progress-card {
@@ -206,6 +201,7 @@ st.markdown(
     border: 1px solid rgba(31, 41, 55, 0.12);
 }
 
+
 .progress-heading {
     display: flex;
     justify-content: space-between;
@@ -214,15 +210,18 @@ st.markdown(
     margin-bottom: 0.55rem;
 }
 
+
 .progress-name {
     font-size: 1.05rem;
     font-weight: 750;
 }
 
+
 .progress-count {
     font-size: 0.92rem;
     opacity: 0.68;
 }
+
 
 .progress-track {
     width: 100%;
@@ -234,6 +233,7 @@ st.markdown(
     overflow: hidden;
 }
 
+
 .progress-fill {
     height: 100%;
 
@@ -244,13 +244,14 @@ st.markdown(
 
 
 /* --------------------------------
-   Edit area
+   Edit section
 -------------------------------- */
 
 .change-title {
     margin-bottom: 0.25rem;
     font-weight: 700;
 }
+
 
 .change-text {
     opacity: 0.67;
@@ -265,44 +266,65 @@ st.markdown(
 
 
 # -------------------------------------------------
-# FIRST-TIME / EMPTY-LIST ONBOARDING
+# COUNTS
+# -------------------------------------------------
+
+counts = get_counts(
+    current_user.id
+)
+
+
+friend_total = counts["Friend"]["total"]
+family_total = counts["Family"]["total"]
+
+
+# -------------------------------------------------
+# BRAND-NEW USER ONBOARDING
 # -------------------------------------------------
 
 @st.dialog("Welcome to InTouch")
-def first_people_dialog(
-    needs_friend: bool,
-    needs_family: bool,
-) -> None:
+def new_user_dialog() -> None:
 
-    if needs_friend and needs_family:
+    st.write(
+        "Who would you like InTouch to help you "
+        "stay connected with?"
+    )
 
-        st.write(
-            "Let’s get your people started with one friend "
-            "and one family member."
-        )
+    # ---------------------------------
+    # GROUP SELECTION
+    # ---------------------------------
+    # These stay OUTSIDE the form so
+    # changing them immediately updates
+    # the dialog.
 
-    elif needs_friend:
+    use_friends = st.checkbox(
+        "Friends",
+        value=current_user.use_friends,
+        key="onboarding_use_friends",
+    )
 
-        st.write(
-            "Your family list is ready. "
-            "Let’s add your first friend."
-        )
+    use_family = st.checkbox(
+        "Family",
+        value=current_user.use_family,
+        key="onboarding_use_family",
+    )
 
-    elif needs_family:
-
-        st.write(
-            "Your friends list is ready. "
-            "Let’s add your first family member."
-        )
+    st.caption(
+        "Choose at least one. You can change this later."
+    )
 
 
-    with st.form("first_people_form"):
+    # ---------------------------------
+    # PERSON INPUTS
+    # ---------------------------------
+
+    with st.form("new_user_form"):
 
         friend_name = ""
         family_name = ""
 
 
-        if needs_friend:
+        if use_friends:
 
             friend_name = st.text_input(
                 "Your first friend",
@@ -310,7 +332,7 @@ def first_people_dialog(
             )
 
 
-        if needs_family:
+        if use_family:
 
             family_name = st.text_input(
                 "Your first family member",
@@ -320,6 +342,139 @@ def first_people_dialog(
 
         submitted = st.form_submit_button(
             "Get started",
+            icon=":material/person_add:",
+            use_container_width=True,
+            type="primary",
+            disabled=not (
+                use_friends
+                or use_family
+            ),
+        )
+
+
+        if submitted:
+
+            # ---------------------------------
+            # NAME VALIDATION
+            # ---------------------------------
+
+            if (
+                use_friends
+                and not friend_name.strip()
+            ):
+
+                st.error(
+                    "Please enter your first friend."
+                )
+
+                return
+
+
+            if (
+                use_family
+                and not family_name.strip()
+            ):
+
+                st.error(
+                    "Please enter your first family member."
+                )
+
+                return
+
+
+            try:
+
+                # Save which groups this user wants.
+                set_user_groups(
+                    current_user.id,
+                    use_friends,
+                    use_family,
+                )
+
+
+                if use_friends:
+
+                    add_person(
+                        current_user.id,
+                        friend_name,
+                        "Friend",
+                    )
+
+
+                if use_family:
+
+                    add_person(
+                        current_user.id,
+                        family_name,
+                        "Family",
+                    )
+
+
+            except ValueError as e:
+
+                st.error(str(e))
+
+                return
+
+
+            st.rerun()
+
+
+# -------------------------------------------------
+# MISSING ACTIVE GROUP DIALOG
+# -------------------------------------------------
+
+@st.dialog("Add someone to continue")
+def missing_group_dialog(
+    needs_friend: bool,
+    needs_family: bool,
+) -> None:
+
+    if needs_friend and needs_family:
+
+        st.write(
+            "Let’s add someone to each of your active lists."
+        )
+
+    elif needs_friend:
+
+        st.write(
+            "Add a friend so InTouch can include "
+            "Friends in your daily connections."
+        )
+
+    elif needs_family:
+
+        st.write(
+            "Add a family member so InTouch can include "
+            "Family in your daily connections."
+        )
+
+
+    with st.form("missing_group_form"):
+
+        friend_name = ""
+        family_name = ""
+
+
+        if needs_friend:
+
+            friend_name = st.text_input(
+                "Friend",
+                placeholder="Enter their name",
+            )
+
+
+        if needs_family:
+
+            family_name = st.text_input(
+                "Family member",
+                placeholder="Enter their name",
+            )
+
+
+        submitted = st.form_submit_button(
+            "Add",
             icon=":material/person_add:",
             use_container_width=True,
             type="primary",
@@ -383,32 +538,43 @@ def first_people_dialog(
 
 
 # -------------------------------------------------
-# ONBOARDING CHECK
+# ONBOARDING / EMPTY ACTIVE GROUP CHECK
 # -------------------------------------------------
 
-counts = get_counts(
-    current_user.id
+is_completely_new = (
+    friend_total == 0
+    and family_total == 0
 )
+
+
+if is_completely_new:
+
+    new_user_dialog()
+
+    # Don't continue into daily drawing until
+    # onboarding has added at least one person.
+    st.stop()
 
 
 needs_friend = (
-    counts["Friend"]["total"] == 0
+    current_user.use_friends
+    and friend_total == 0
 )
 
+
 needs_family = (
-    counts["Family"]["total"] == 0
+    current_user.use_family
+    and family_total == 0
 )
 
 
 if needs_friend or needs_family:
 
-    first_people_dialog(
+    missing_group_dialog(
         needs_friend=needs_friend,
         needs_family=needs_family,
     )
 
-    # Don't attempt a daily draw until both
-    # lists contain at least one person.
     st.stop()
 
 
@@ -421,34 +587,58 @@ today_result = get_or_create_today_draw(
 )
 
 
-# The draw may have changed remaining counts,
-# so refresh them after loading today's pair.
+# Loading today's draw changes drawn-state,
+# so refresh counts afterward.
 counts = get_counts(
     current_user.id
 )
 
 
 st.markdown(
-    """
+    f"""
 <div class="section-title">
-Today's connections
+{"Today's connections" if current_user.use_friends and current_user.use_family else "Today's connection"}
 </div>
 """,
     unsafe_allow_html=True,
 )
 
 
-st.markdown(
-    f"""
-<div class="connection-wrap">
+# Build only the cards that apply to this user.
+
+connection_cards = ""
+
+
+if (
+    current_user.use_friends
+    and today_result.friend is not None
+):
+
+    connection_cards += f"""
 <div class="connection-card">
 <div class="connection-type">Friend</div>
 <div class="connection-name">{today_result.friend}</div>
 </div>
+"""
+
+
+if (
+    current_user.use_family
+    and today_result.family is not None
+):
+
+    connection_cards += f"""
 <div class="connection-card">
 <div class="connection-type">Family</div>
 <div class="connection-name">{today_result.family}</div>
 </div>
+"""
+
+
+st.markdown(
+    f"""
+<div class="connection-wrap">
+{connection_cards}
 </div>
 """,
     unsafe_allow_html=True,
@@ -482,15 +672,20 @@ st.divider()
 
 friend_total = counts["Friend"]["total"]
 friend_remaining = counts["Friend"]["remaining"]
-friend_reached = (
-    friend_total - friend_remaining
-)
-
 
 family_total = counts["Family"]["total"]
 family_remaining = counts["Family"]["remaining"]
+
+
+friend_reached = (
+    friend_total
+    - friend_remaining
+)
+
+
 family_reached = (
-    family_total - family_remaining
+    family_total
+    - family_remaining
 )
 
 
@@ -508,6 +703,44 @@ family_progress = (
 )
 
 
+# -----------------------------------------
+# Summary wording
+# -----------------------------------------
+
+people_parts = []
+
+
+if current_user.use_friends:
+
+    friend_word = (
+        "friend"
+        if friend_total == 1
+        else "friends"
+    )
+
+    people_parts.append(
+        f"{friend_total} {friend_word}"
+    )
+
+
+if current_user.use_family:
+
+    family_word = (
+        "family member"
+        if family_total == 1
+        else "family members"
+    )
+
+    people_parts.append(
+        f"{family_total} {family_word}"
+    )
+
+
+people_summary = " · ".join(
+    people_parts
+)
+
+
 st.markdown(
     """
 <div class="section-title">
@@ -521,7 +754,7 @@ Your people
 st.markdown(
     f"""
 <div class="people-total">
-{friend_total} friends · {family_total} family members
+{people_summary}
 </div>
 """,
     unsafe_allow_html=True,
@@ -532,8 +765,10 @@ st.markdown(
 # FRIEND PROGRESS
 # -------------------------------------------------
 
-st.markdown(
-    f"""
+if current_user.use_friends:
+
+    st.markdown(
+        f"""
 <div class="progress-card">
 <div class="progress-heading">
 <span class="progress-name">Friends</span>
@@ -544,16 +779,18 @@ st.markdown(
 </div>
 </div>
 """,
-    unsafe_allow_html=True,
-)
+        unsafe_allow_html=True,
+    )
 
 
 # -------------------------------------------------
 # FAMILY PROGRESS
 # -------------------------------------------------
 
-st.markdown(
-    f"""
+if current_user.use_family:
+
+    st.markdown(
+        f"""
 <div class="progress-card">
 <div class="progress-heading">
 <span class="progress-name">Family</span>
@@ -564,8 +801,8 @@ st.markdown(
 </div>
 </div>
 """,
-    unsafe_allow_html=True,
-)
+        unsafe_allow_html=True,
+    )
 
 
 st.divider()
@@ -580,6 +817,7 @@ st.markdown(
 <div class="change-title">
 Need to make a change?
 </div>
+
 <div class="change-text">
 Add someone new, remove someone, or update your lists.
 </div>
@@ -597,6 +835,7 @@ if st.button(
     st.switch_page(
         "pages/2_Edit.py"
     )
+
 
 # -------------------------------------------------
 # ACCOUNT
